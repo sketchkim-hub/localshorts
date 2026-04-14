@@ -437,7 +437,7 @@ input[type="range"]{flex:1;accent-color:var(--accent);}
 
   <div class="section">
     <div class="section-label">채널명</div>
-    <input type="text" id="channelName" value="대전뉴스" oninput="updatePreview()">
+    <input type="text" id="channelName" value="e-빠른뉴스" oninput="updatePreview()">
   </div>
 
   <div class="section">
@@ -642,7 +642,7 @@ input[type="range"]{flex:1;accent-color:var(--accent);}
 const S = {
   category:'속보', headline:'', body:'', source:'', ticker:'',
   template:'breaking', photos:[], selPhoto:0, layout:'full',
-  channel:'대전뉴스', hSize:20, bSize:11,
+  channel:'e-빠른뉴스', hSize:20, bSize:11,
   engine:'google', googleVoice:'ko-KR-Neural2-A', geminiVoice:'Kore', browserVoice:'default',
   allNews:[], filteredNews:[], selectedNews:null
 };
@@ -1261,7 +1261,7 @@ function updatePreview(){
   S.body=document.getElementById('bodyText').value;
   S.source=document.getElementById('sourceText').value;
   S.ticker=document.getElementById('ticker').value;
-  S.channel=document.getElementById('channelName').value||'대전뉴스';
+  S.channel=document.getElementById('channelName').value||'e-빠른뉴스';
   S.hSize=document.getElementById('headlineSize').value;
   S.bSize=document.getElementById('bodySize').value;
   const tpl=S.template, photo=S.photos[S.selPhoto];
@@ -1672,7 +1672,7 @@ async function drawNewsCard(ctx, W, H){
   ctx.fillStyle = p.logo;
   ctx.font = `bold 42px 'Noto Sans KR', sans-serif`;
   ctx.textAlign = 'left';
-  ctx.fillText(S.channel || '대전뉴스', 60, 100);
+  ctx.fillText(S.channel || 'e-빠른뉴스', 60, 100);
 
   // 날짜
   const now = new Date();
