@@ -693,20 +693,18 @@ async function fetchNewsWithClaude(apiKey, filterLabel='전체'){
 
   list.innerHTML = `<div class="news-loading">🟠 Claude가 <strong>${filterLabel}</strong> 뉴스 생성 중...</div>`;
 
-  const prompt = `당신은 대전·세종·충청남도 지역 전문 뉴스 큐레이터입니다.
-오늘 날짜: ${today}
-
-다음 주제로 대전·세종·충남 지역에서 실제로 일어날 법한 뉴스 10건을 JSON 배열로 생성해주세요.
+  const prompt = `대전·세종·충남 지역 뉴스 ${filterLabel} 분야 10건을 아래 JSON 배열 형식으로만 출력하세요.
 주제: ${topic.query}
+오늘: ${today}
 
-규칙:
-- 실제 존재하는 지역 기관·장소·기업 이름 사용 (대전시청, 세종시, KAIST, 대덕특구, 유성구, 서구, 충남도청 등)
-- 각 뉴스는 서로 다른 세부 주제
-- 카테고리는 정치/경제/사회/문화/스포츠 중 하나
-- desc는 구체적이고 현실적인 2문장
+조건:
+- 실제 지역 기관명 사용 (대전시청, 세종시청, KAIST, 대덕특구, 충남도청 등)
+- category는 반드시 정치/경제/사회/문화/스포츠 중 정확히 하나
+- source는 반드시 대전일보/중도일보/충청투데이/연합뉴스/대전MBC 중 하나
+- region은 반드시 대전/세종/충남 중 하나
+- 설명, 인사말, 마크다운 절대 금지 — 반드시 [ 로 시작해서 ] 로 끝나는 JSON 배열만 출력
 
-JSON 형식 (마크다운·설명 없이 배열만):
-[{"title":"제목(30자이내)","desc":"내용(100자이내)","source":"대전일보|중도일보|충청투데이|연합뉴스|대전MBC 중 하나","category":"정치|경제|사회|문화|스포츠","region":"대전|세종|충남"}]`;
+[{"title":"제목","desc":"내용 2문장","source":"언론사","category":"분야","region":"지역"},...]`;
 
   try {
     const res = await fetch('https://api.anthropic.com/v1/messages',{
@@ -733,12 +731,43 @@ JSON 형식 (마크다운·설명 없이 배열만):
       throw new Error(`[${res.status}] ${errType}: ${errMsg}`);
     }
 
-    const raw = data.content?.[0]?.text?.trim() || '[]';
-    // JSON 파싱 — 마크다운 펜스 제거
-    const clean = raw.replace(/^```[\w\s]*\n?/m,'').replace(/\n?```\s*$/m,'').trim();
-    const items = JSON.parse(clean);
+    const raw = data.content?.[0]?.text?.trim() || '';
+    if(!raw) throw new Error('Claude 응답이 비어있습니다');
 
-    if(!Array.isArray(items) || items.length === 0) throw new Error('뉴스 데이터가 비어있습니다');
+    // JSON 파싱 — 여러 방식으로 시도
+    let items = null;
+    let parseErr = '';
+
+    // 방법 1: 마크다운 코드블록 제거 후 파싱
+    try {
+      const clean = raw.replace(/^```[\w\s]*\n?/m,'').replace(/\n?```\s*$/m,'').trim();
+      items = JSON.parse(clean);
+    } catch(e1){ parseErr = e1.message; }
+
+    // 방법 2: 텍스트에서 [ ... ] 배열 부분만 추출
+    if(!items){
+      try {
+        const match = raw.match(/\[[\s\S]*\]/);
+        if(match) items = JSON.parse(match[0]);
+      } catch(e2){ parseErr = e2.message; }
+    }
+
+    // 방법 3: 줄 단위로 JSON 객체 추출
+    if(!items){
+      try {
+        const objs = [];
+        const objMatches = raw.matchAll(/\{[^{}]+\}/g);
+        for(const m of objMatches){
+          try { objs.push(JSON.parse(m[0])); } catch(e){}
+        }
+        if(objs.length > 0) items = objs;
+      } catch(e3){}
+    }
+
+    if(!items || !Array.isArray(items) || items.length === 0){
+      // 파싱 실패 시 원문 일부 표시
+      throw new Error(`JSON 파싱 실패: ${parseErr}\n\n[Claude 응답 앞부분]\n${raw.slice(0,200)}`);
+    }
 
     S.allNews = items.map((it,i)=>({...it, pubDate:new Date().toISOString(), id:i}));
     S.filteredNews = [...S.allNews];
@@ -755,10 +784,11 @@ JSON 형식 (마크다운·설명 없이 배열만):
 
     list.innerHTML = `<div class="news-empty">
       <div style="color:var(--accent);font-weight:700;margin-bottom:8px">⚠️ 오류 발생</div>
-      <div style="font-size:11px;background:rgba(255,59,92,0.08);border:1px solid rgba(255,59,92,0.2);border-radius:8px;padding:10px;text-align:left;word-break:break-all;margin-bottom:10px">${e.message}</div>
+      <div style="font-size:11px;background:rgba(255,59,92,0.08);border:1px solid rgba(255,59,92,0.2);border-radius:8px;padding:10px;text-align:left;word-break:break-all;margin-bottom:10px;white-space:pre-wrap;max-height:150px;overflow-y:auto">${e.message}</div>
       <div style="font-size:12px;color:var(--text2)">${guide}</div>
       ${isAuthErr ? `<button onclick="switchTab(0)" style="margin-top:12px;background:linear-gradient(135deg,var(--claude),#b45309);border:none;color:#fff;padding:10px 20px;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer">🔑 API 설정으로 이동</button>` : ''}
       ${isNetErr  ? `<div style="margin-top:10px;font-size:11px;color:var(--text2)">현재 Claude.ai 샌드박스에서는<br>외부 API 직접 호출이 차단됩니다.<br>파일을 저장 후 GitHub Pages에 올려서 사용하세요.</div>` : ''}
+      <button onclick="fetchNews()" style="margin-top:12px;background:var(--card);border:1px solid var(--border);color:var(--text);padding:8px 16px;border-radius:8px;font-size:12px;cursor:pointer">🔄 다시 시도</button>
     </div>`;
     showToast('⚠️ '+e.message.slice(0,60), 5000);
   }
