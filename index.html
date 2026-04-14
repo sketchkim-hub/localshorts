@@ -332,11 +332,18 @@ input[type="range"]{flex:1;accent-color:var(--accent);}
       <div class="nf-chip" onclick="filterNews(this,'문화')">🎭 문화</div>
       <div class="nf-chip" onclick="filterNews(this,'스포츠')">⚽ 스포츠</div>
     </div>
+    <div style="font-size:11px;color:var(--text2);margin-bottom:10px;padding:8px 10px;background:rgba(217,119,6,0.07);border-radius:8px;border:1px solid rgba(217,119,6,0.2)">
+      🟠 Claude API로 대전·세종·충남 뉴스 주제를 생성합니다<br>
+      카테고리 탭 클릭 시 해당 분야 뉴스를 새로 불러옵니다
+    </div>
 
     <div class="news-list" id="newsList">
       <div class="news-empty">
-        📰 뉴스 불러오기 버튼을 탭하세요<br>
-        <span style="font-size:11px;margin-top:6px;display:block">대전·세종·충남 최신 뉴스를 자동 수집합니다</span>
+        🟠 Claude API로 뉴스를 생성합니다<br>
+        <span style="font-size:11px;margin-top:8px;display:block">
+          API 설정 탭에서 Anthropic 키를 입력 후<br>
+          <strong style="color:var(--accent3)">뉴스 불러오기</strong> 버튼을 탭하세요
+        </span>
       </div>
     </div>
   </div>
@@ -599,14 +606,14 @@ const VOICES = {
   ]
 };
 
-// ════════ NEWS RSS SOURCES ════════
-// CORS 우회를 위해 allorigins.win 공개 프록시 사용
-const RSS_SOURCES = [
-  {name:'대전일보', url:'https://www.daejonilbo.com/rss/rss.asp', region:'대전'},
-  {name:'중도일보', url:'http://www.joongdo.co.kr/rss/allArticle.xml', region:'대전'},
-  {name:'충청투데이', url:'https://www.cctoday.co.kr/rss/allArticle.xml', region:'충청'},
-  {name:'연합뉴스(대전)', url:'https://www.yna.co.kr/rss/local.xml', region:'대전'},
-  {name:'네이버뉴스(대전)', url:'https://news.naver.com/main/rss/searchRss.nhn?q=%EB%8C%80%EC%A0%84', region:'대전'},
+// ════════ NEWS TOPICS ════════
+const NEWS_TOPICS = [
+  {label:'전체',  query:'대전 세종 충남 주요 뉴스'},
+  {label:'정치',  query:'대전 세종 충남 정치 행정 시정 뉴스'},
+  {label:'경제',  query:'대전 세종 충남 경제 산업 기업 투자 뉴스'},
+  {label:'사회',  query:'대전 세종 충남 사회 생활 교통 환경 뉴스'},
+  {label:'문화',  query:'대전 세종 충남 문화 축제 공연 관광 뉴스'},
+  {label:'스포츠', query:'대전 세종 충남 스포츠 체육 뉴스'},
 ];
 
 // ════════ TOAST ════════
@@ -653,122 +660,107 @@ function toggleVis(id,btn){
 }
 function getKey(type){ return localStorage.getItem('snm_key_'+type)||document.getElementById(type+'Key')?.value?.trim()||''; }
 
-// ════════ NEWS FETCH ════════
+// ════════ NEWS FETCH (Claude API 전용) ════════
+let currentFilter = '전체';
+
 async function fetchNews(){
-  const list = document.getElementById('newsList');
-  list.innerHTML = '<div class="news-loading">📡 대전권 뉴스 수집 중...</div>';
-  S.allNews = [];
-
-  // allorigins.win CORS 프록시로 RSS 파싱
-  const proxy = 'https://api.allorigins.win/get?url=';
-
-  // 네이버 뉴스 검색 API (CORS 허용) 대안: RSS2JSON 서비스
-  const rss2json = 'https://api.rss2json.com/v1/api.json?rss_url=';
-
-  const queries = [
-    '대전 뉴스', '세종 뉴스', '충남 뉴스', '대전 경제', '대전 정치',
-    '대전 사회', '대전시', '세종시', '충청남도'
-  ];
-
-  // 네이버 뉴스 검색 RSS (공개 API)
-  const naverRSS = [
-    `https://news.naver.com/main/rss/searchRss.nhn?q=%EB%8C%80%EC%A0%84`,
-    `https://news.naver.com/main/rss/searchRss.nhn?q=%EC%84%B8%EC%A2%85`,
-    `https://news.naver.com/main/rss/searchRss.nhn?q=%EC%B6%A9%EB%82%A8`,
-  ];
-
-  let fetched = 0;
-  const results = [];
-
-  for(const rssUrl of naverRSS){
-    try {
-      const encoded = encodeURIComponent(rssUrl);
-      const res = await fetch(`${rss2json}${encoded}&count=10`);
-      if(!res.ok) continue;
-      const data = await res.json();
-      if(data.status==='ok' && data.items){
-        data.items.forEach(item=>{
-          results.push({
-            title: item.title?.replace(/<[^>]*>/g,'').trim() || '',
-            desc:  item.description?.replace(/<[^>]*>/g,'').replace(/&[^;]+;/g,' ').trim().slice(0,150) || '',
-            link:  item.link || '',
-            source: item.author || data.feed?.title || '뉴스',
-            pubDate: item.pubDate || '',
-            region: '대전권',
-            category: guessCategory(item.title+' '+item.description)
-          });
-        });
-        fetched++;
-      }
-    } catch(e){ console.warn('RSS fetch error:', e); }
-  }
-
-  // Claude API로 대전 뉴스 추천 받기 (Anthropic API 있을 때)
   const aKey = getKey('anthropic');
-  if(aKey && results.length === 0){
-    await fetchNewsWithClaude(aKey);
+  if(!aKey){
+    document.getElementById('newsList').innerHTML = `
+      <div class="news-empty">
+        🔑 Anthropic API 키가 필요합니다<br>
+        <span style="font-size:11px;margin-top:8px;display:block;color:var(--accent)">
+          ① API 설정 탭에서 키를 입력하세요<br>
+          ② 저장 후 다시 시도하세요
+        </span>
+        <div style="margin-top:12px">
+          <button onclick="switchTab(0)" style="background:linear-gradient(135deg,var(--claude),#b45309);border:none;color:#fff;padding:10px 20px;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer">
+            🔑 API 설정 탭으로 이동
+          </button>
+        </div>
+      </div>`;
     return;
   }
-
-  if(results.length > 0){
-    S.allNews = results;
-    S.filteredNews = [...results];
-    renderNewsList(results);
-    showToast(`✅ 뉴스 ${results.length}건 수집 완료`);
-  } else {
-    // fallback: Claude에게 뉴스 추천 요청
-    if(aKey){
-      await fetchNewsWithClaude(aKey);
-    } else {
-      list.innerHTML = `<div class="news-empty">
-        ⚠️ RSS 수집 실패<br>
-        <span style="font-size:11px;margin-top:6px;display:block">
-          Anthropic API 키를 설정하면<br>Claude가 최신 뉴스 주제를 추천해드립니다
-        </span>
-      </div>`;
-    }
-  }
+  await fetchNewsWithClaude(aKey, currentFilter);
 }
 
-async function fetchNewsWithClaude(apiKey){
+async function fetchNewsWithClaude(apiKey, filterLabel='전체'){
   const list = document.getElementById('newsList');
-  list.innerHTML = '<div class="news-loading">🟠 Claude가 대전권 뉴스 주제 추천 중...</div>';
+  const topic = NEWS_TOPICS.find(t=>t.label===filterLabel) || NEWS_TOPICS[0];
+  const today = new Date().toLocaleDateString('ko-KR',{year:'numeric',month:'long',day:'numeric',weekday:'long'});
 
-  const today = new Date().toLocaleDateString('ko-KR');
-  const prompt = `오늘(${today}) 대전, 세종, 충남 지역에서 주목받을 만한 뉴스 주제 8개를 추천해주세요.
-각 뉴스는 다음 JSON 배열 형식으로만 출력하세요 (마크다운 없이):
-[
-  {"title":"뉴스 제목","desc":"2-3문장 내용 요약","source":"언론사 추정","category":"사회|경제|정치|문화|스포츠 중 하나","region":"대전|세종|충남"},
-  ...
-]
-실제 가능성 있는 지역 뉴스 주제로 작성하되, 사실처럼 보이는 허구 내용은 피해주세요. 대신 해당 지역에서 자주 다뤄지는 유형의 뉴스 주제를 제안하세요.`;
+  list.innerHTML = `<div class="news-loading">🟠 Claude가 <strong>${filterLabel}</strong> 뉴스 생성 중...</div>`;
+
+  const prompt = `당신은 대전·세종·충청남도 지역 전문 뉴스 큐레이터입니다.
+오늘 날짜: ${today}
+
+다음 주제로 대전·세종·충남 지역에서 실제로 일어날 법한 뉴스 10건을 JSON 배열로 생성해주세요.
+주제: ${topic.query}
+
+규칙:
+- 실제 존재하는 지역 기관·장소·기업 이름 사용 (대전시청, 세종시, KAIST, 대덕특구, 유성구, 서구, 충남도청 등)
+- 각 뉴스는 서로 다른 세부 주제
+- 카테고리는 정치/경제/사회/문화/스포츠 중 하나
+- desc는 구체적이고 현실적인 2문장
+
+JSON 형식 (마크다운·설명 없이 배열만):
+[{"title":"제목(30자이내)","desc":"내용(100자이내)","source":"대전일보|중도일보|충청투데이|연합뉴스|대전MBC 중 하나","category":"정치|경제|사회|문화|스포츠","region":"대전|세종|충남"}]`;
 
   try {
     const res = await fetch('https://api.anthropic.com/v1/messages',{
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({ model:'claude-sonnet-4-20250514', max_tokens:2000, messages:[{role:'user',content:prompt}] })
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        model:'claude-sonnet-4-20250514',
+        max_tokens:3000,
+        messages:[{role:'user', content:prompt}]
+      })
     });
+
+    if(!res.ok){
+      const err = await res.json();
+      throw new Error(err.error?.message || `HTTP ${res.status}`);
+    }
+
     const data = await res.json();
-    const text = data.content?.[0]?.text?.trim()||'[]';
-    const clean = text.replace(/```json|```/g,'').trim();
+    const raw = data.content?.[0]?.text?.trim() || '[]';
+    // JSON 파싱 — 마크다운 펜스 제거
+    const clean = raw.replace(/^```[\w]*\n?/,'').replace(/\n?```$/,'').trim();
     const items = JSON.parse(clean);
 
-    S.allNews = items.map((it,i)=>({...it, link:'', pubDate: new Date().toISOString(), id:i}));
+    S.allNews = items.map((it,i)=>({...it, pubDate:new Date().toISOString(), id:i}));
     S.filteredNews = [...S.allNews];
     renderNewsList(S.filteredNews);
-    showToast(`✨ Claude 뉴스 추천 ${items.length}건 완료`);
+    showToast(`✅ 뉴스 ${items.length}건 생성 완료`);
+
   } catch(e){
-    console.error(e);
-    list.innerHTML = '<div class="news-empty">⚠️ 뉴스 수집 실패<br><span style="font-size:11px">API 키를 확인하거나 직접 편집 탭에서 입력하세요</span></div>';
+    console.error('Claude news error:', e);
+    list.innerHTML = `<div class="news-empty">
+      ⚠️ 오류: ${e.message}<br>
+      <span style="font-size:11px;margin-top:6px;display:block">
+        API 키를 확인하거나 다시 시도해주세요
+      </span>
+    </div>`;
+    showToast('⚠️ '+e.message, 4000);
   }
 }
 
-function guessCategory(text){
-  if(/경제|산업|기업|투자|부동산|일자리/.test(text)) return '경제';
-  if(/정치|선거|시장|도지사|의회/.test(text)) return '정치';
-  if(/문화|축제|공연|전시|예술/.test(text)) return '문화';
-  if(/스포츠|축구|야구|농구|마라톤/.test(text)) return '스포츠';
-  return '사회';
+function filterNews(el, cat){
+  document.querySelectorAll('.nf-chip').forEach(c=>c.classList.remove('active'));
+  el.classList.add('active');
+  currentFilter = cat;
+  // 카테고리 변경시 Claude에 해당 카테고리로 재요청
+  const aKey = getKey('anthropic');
+  if(aKey && S.allNews.length > 0){
+    // 이미 로드된 경우 필터링만
+    S.filteredNews = cat==='전체' ? [...S.allNews] : S.allNews.filter(n=>n.category===cat);
+    if(S.filteredNews.length > 0){
+      renderNewsList(S.filteredNews);
+    } else {
+      // 해당 카테고리 뉴스 없으면 Claude에 재요청
+      fetchNewsWithClaude(aKey, cat);
+    }
+  }
 }
 
 function filterNews(el, cat){
