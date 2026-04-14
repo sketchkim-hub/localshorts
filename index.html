@@ -702,9 +702,10 @@ async function fetchNewsWithClaude(apiKey, filterLabel='전체'){
 - category는 반드시 정치/경제/사회/문화/스포츠 중 정확히 하나
 - source는 반드시 대전일보/중도일보/충청투데이/연합뉴스/대전MBC 중 하나
 - region은 반드시 대전/세종/충남 중 하나
+- pubDate는 오늘 기준 최근 7일 이내 날짜를 YYYY-MM-DD 형식으로 (날짜마다 다르게)
 - 설명, 인사말, 마크다운 절대 금지 — 반드시 [ 로 시작해서 ] 로 끝나는 JSON 배열만 출력
 
-[{"title":"제목","desc":"내용 2문장","source":"언론사","category":"분야","region":"지역"},...]`;
+[{"title":"제목","desc":"내용 2문장","source":"언론사","category":"분야","region":"지역","pubDate":"2025-04-14"},...]`;
 
   try {
     const res = await fetch('https://api.anthropic.com/v1/messages',{
@@ -769,7 +770,7 @@ async function fetchNewsWithClaude(apiKey, filterLabel='전체'){
       throw new Error(`JSON 파싱 실패: ${parseErr}\n\n[Claude 응답 앞부분]\n${raw.slice(0,200)}`);
     }
 
-    S.allNews = items.map((it,i)=>({...it, pubDate:new Date().toISOString(), id:i}));
+    S.allNews = items.map((it,i)=>({...it, pubDate: it.pubDate || new Date().toISOString().slice(0,10), id:i}));
     S.filteredNews = [...S.allNews];
     renderNewsList(S.filteredNews);
     showToast(`✅ 뉴스 ${items.length}건 생성 완료`);
@@ -808,6 +809,21 @@ function filterNews(el, cat){
   fetchNewsWithClaude(aKey, cat);
 }
 
+function formatNewsDate(dateStr){
+  if(!dateStr) return '';
+  try {
+    const d = new Date(dateStr);
+    const now = new Date();
+    const diffMs = now - d;
+    const diffDays = Math.floor(diffMs / (1000*60*60*24));
+    const ymd = d.toLocaleDateString('ko-KR',{year:'numeric',month:'long',day:'numeric'});
+    if(diffDays === 0) return `📅 오늘 · ${ymd}`;
+    if(diffDays === 1) return `📅 어제 · ${ymd}`;
+    if(diffDays <= 7)  return `📅 ${diffDays}일 전 · ${ymd}`;
+    return `📅 ${ymd}`;
+  } catch(e){ return dateStr; }
+}
+
 function renderNewsList(items){
   const list = document.getElementById('newsList');
   if(!items.length){ list.innerHTML='<div class="news-empty">해당 카테고리 뉴스가 없습니다</div>'; return; }
@@ -820,7 +836,7 @@ function renderNewsList(items){
       </div>
       <div class="ni-title">${item.title}</div>
       <div class="ni-desc">${item.desc||''}</div>
-      <div class="ni-time">${item.pubDate ? new Date(item.pubDate).toLocaleString('ko-KR') : ''}</div>
+      <div class="ni-time">${formatNewsDate(item.pubDate)}</div>
     </div>
   `).join('');
 }
