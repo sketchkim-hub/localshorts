@@ -1477,29 +1477,62 @@ async function makeMp4(){
     const chunks = [];
     recorder.ondataavailable = e => { if(e.data.size>0) chunks.push(e.data); };
 
-    const bgImageData = ctx.getImageData(0, 0, W, H);
+    // 사진 슬라이드쇼 준비 — 사진 수에 따라 균등 전환
+    const photoCount = S.photos.length;
+    const slideInterval = photoCount > 1 ? durationSec / photoCount : durationSec;
 
-    setMp4Progress(55, '녹화 시작...');
+    // 모든 사진 미리 로드
+    const preloadedImgs = [];
+    if(photoCount > 0 && S.layout !== 'none'){
+      setMp4Progress(62, '사진 로딩 중...');
+      for(let i=0; i<photoCount; i++){
+        try { preloadedImgs.push(await loadImage(S.photos[i])); }
+        catch(e){ preloadedImgs.push(null); }
+      }
+    }
 
-    // ★ setTimeout 기반 정밀 타이머 (rAF 대신 — 백그라운드에서도 정확)
+    // 배경(텍스트+레이아웃) 레이어를 사진 없이 먼저 그려서 캐시
+    const bgFrames = []; // 각 사진별 배경 이미지데이터 캐시
+    setMp4Progress(65, '프레임 준비 중...');
+    for(let pi=0; pi < Math.max(photoCount,1); pi++){
+      await drawNewsCardWithPhoto(ctx, W, H, preloadedImgs[pi] || null);
+      bgFrames.push(ctx.getImageData(0, 0, W, H));
+    }
+
+    setMp4Progress(70, '녹화 시작...');
+
+    // ★ setInterval 기반 정밀 루프 (setTimeout 재귀 → 스택 누적 멈춤 방지)
     await new Promise((resolve, reject) => {
       recorder.onstop = resolve;
-      recorder.onerror = reject;
+      recorder.onerror = e => reject(e);
       recorder.start(200);
 
       const startTime = performance.now();
-      const FRAME_MS  = 1000 / 30; // 30fps = 33ms
+      const FRAME_MS  = 1000 / 24; // 24fps — 안정성 우선
+      let lastPhotoIdx = -1;
 
-      const renderFrame = () => {
-        const elapsed = (performance.now() - startTime) / 1000; // 실제 경과 초
+      const intervalId = setInterval(() => {
+        const elapsed = (performance.now() - startTime) / 1000;
 
         if(elapsed >= durationSec){
+          clearInterval(intervalId);
           recorder.stop();
           return;
         }
 
-        // 배경 복원
-        ctx.putImageData(bgImageData, 0, 0);
+        // 현재 표시할 사진 인덱스
+        const photoIdx = Math.min(
+          Math.floor(elapsed / slideInterval),
+          photoCount > 0 ? photoCount - 1 : 0
+        );
+
+        // 사진이 바뀔 때만 배경 복원 (성능 최적화)
+        if(photoIdx !== lastPhotoIdx || lastPhotoIdx === -1){
+          ctx.putImageData(bgFrames[Math.min(photoIdx, bgFrames.length-1)], 0, 0);
+          lastPhotoIdx = photoIdx;
+        } else {
+          ctx.putImageData(bgFrames[Math.min(photoIdx, bgFrames.length-1)], 0, 0);
+        }
 
         // 자막 그리기
         const cue = cues.find(c => elapsed >= c.start && elapsed < c.end);
@@ -1507,17 +1540,12 @@ async function makeMp4(){
           drawSubtitle(ctx, cue.text, W, H, sc, hasBg, hasStroke);
         }
 
-        // 진행률 업데이트
-        const pct = 55 + Math.round((elapsed / durationSec) * 40);
-        if(Math.round(elapsed * 2) % 2 === 0){ // 0.5초마다 업데이트
-          setMp4Progress(Math.min(pct, 94),
-            `녹화 중... ${elapsed.toFixed(1)}/${durationSec}초`);
-        }
+        // 진행률
+        const pct = 70 + Math.round((elapsed / durationSec) * 25);
+        setMp4Progress(Math.min(pct, 94),
+          `녹화 중... ${elapsed.toFixed(1)}/${durationSec}초 [사진${Math.min(photoIdx+1, photoCount)}/${Math.max(photoCount,1)}]`);
 
-        setTimeout(renderFrame, FRAME_MS);
-      };
-
-      setTimeout(renderFrame, FRAME_MS);
+      }, FRAME_MS);
     });
 
     setMp4Progress(97, 'MP4 파일 생성 중...');
@@ -1613,8 +1641,15 @@ function downloadMp4(){
   showToast('⬇️ 다운로드 시작!');
 }
 
-// 뉴스 카드를 Canvas에 그리기
+// 뉴스 카드를 Canvas에 그리기 (기본 — 선택된 사진 사용)
 async function drawNewsCard(ctx, W, H){
+  const photo = S.photos.length > 0 ? S.photos[S.selPhoto] : null;
+  const img = photo ? await loadImage(photo).catch(()=>null) : null;
+  await drawNewsCardWithPhoto(ctx, W, H, img);
+}
+
+// 뉴스 카드 실제 렌더링 — img 객체 직접 받음 (슬라이드쇼용)
+async function drawNewsCardWithPhoto(ctx, W, H, img){
   const tpl = S.template;
 
   // 배경 그라데이션
@@ -1632,25 +1667,32 @@ async function drawNewsCard(ctx, W, H){
   ctx.fillStyle = grd;
   ctx.fillRect(0, 0, W, H);
 
-  // 사진
-  const photo = S.photos[S.selPhoto];
-  if(photo && S.layout !== 'none'){
+  // 사진 그리기 — img 파라미터 사용
+  if(img && S.layout !== 'none'){
     try {
-      const img = await loadImage(photo);
       const ph = Math.round(H * 0.45);
       const py = S.layout === 'top' ? 160 : Math.round(H * 0.28);
       const margin = 60;
       ctx.save();
       roundRect(ctx, margin, py, W-margin*2, ph, 40);
       ctx.clip();
-      // cover fit
       const ir = img.width/img.height, cr = (W-margin*2)/ph;
       let sw,sh,sx,sy;
       if(ir>cr){ sh=img.height; sw=sh*cr; sx=(img.width-sw)/2; sy=0; }
       else { sw=img.width; sh=sw/cr; sx=0; sy=(img.height-sh)/2; }
       ctx.drawImage(img, sx,sy,sw,sh, margin,py, W-margin*2, ph);
       ctx.restore();
-    } catch(e){ console.warn('이미지 로드 실패', e); }
+    } catch(e){ console.warn('이미지 그리기 실패', e); }
+  } else if(S.layout !== 'none'){
+    // 사진 없을 때 빈 영역 표시
+    const ph = Math.round(H * 0.45);
+    const py = S.layout === 'top' ? 160 : Math.round(H * 0.28);
+    const margin = 60;
+    ctx.save();
+    ctx.fillStyle = 'rgba(255,255,255,0.05)';
+    roundRect(ctx, margin, py, W-margin*2, ph, 40);
+    ctx.fill();
+    ctx.restore();
   }
 
   // 색상 팔레트
