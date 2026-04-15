@@ -493,8 +493,8 @@ input[type="range"]{flex:1;accent-color:var(--accent);}
     <div style="display:flex;gap:6px;margin-bottom:8px">
       <div class="ai-btn claude-btn" id="aiBBtn" onclick="aiGen('body')" style="margin-bottom:0">🟠 Claude 생성</div>
     </div>
-    <textarea id="bodyText" rows="4" placeholder="뉴스 내용 (최대 120자)" maxlength="120" oninput="updatePreview();updateCC('bodyText',120,'bc')"></textarea>
-    <div class="char-count" id="bc">0/120</div>
+    <textarea id="bodyText" rows="6" placeholder="뉴스 내용 (최대 500자)" maxlength="500" oninput="updatePreview();updateCC('bodyText',500,'bc')"></textarea>
+    <div class="char-count" id="bc">0/500</div>
   </div>
 
   <div class="section">
@@ -1044,7 +1044,7 @@ function applyScriptToEditor(){
   const s = convertedScript;
 
   if(s.headline){ document.getElementById('headline').value=s.headline; updateCC('headline',30,'hc'); }
-  if(s.body)    { document.getElementById('bodyText').value=s.body;     updateCC('bodyText',120,'bc'); }
+  if(s.body)    { document.getElementById('bodyText').value=s.body;     updateCC('bodyText',500,'bc'); }
   if(s.ticker)    document.getElementById('ticker').value=s.ticker;
   if(s.ttsScript) document.getElementById('ttsText').value=s.ttsScript;
   if(s.source)    document.getElementById('sourceText').value=s.source;
@@ -1082,7 +1082,7 @@ async function aiGen(type){
     prompt=`한국 뉴스 에디터. 카테고리 "${cat}" 대전/세종/충남 지역 뉴스. 강렬한 쇼츠 헤드라인 1개, 25자이내. 마크다운 없이 헤드라인만.${newsContext}`;
   } else if(type==='body'){
     const hl=document.getElementById('headline').value;
-    prompt=`쇼츠 뉴스 본문. 헤드라인: "${hl||cat+' 뉴스'}". 70자이내. 마크다운 없이 본문만.${newsContext}`;
+    prompt=`쇼츠 뉴스 본문. 헤드라인: "${hl||cat+' 뉴스'}". 500자이내. 마크다운 없이 본문만.${newsContext}`;
   } else {
     const hl=document.getElementById('headline').value;
     const b=document.getElementById('bodyText').value;
@@ -1104,7 +1104,7 @@ async function aiGen(type){
     if(!res.ok) throw new Error(data.error?.message || `HTTP ${res.status}`);
     const result=data.content?.[0]?.text?.trim()||'';
     if(type==='headline'){ document.getElementById('headline').value=result; updateCC('headline',30,'hc'); }
-    else if(type==='body'){ document.getElementById('bodyText').value=result; updateCC('bodyText',120,'bc'); }
+    else if(type==='body'){ document.getElementById('bodyText').value=result; updateCC('bodyText',500,'bc'); }
     else document.getElementById('ttsText').value=result;
     updatePreview(); showToast('✨ Claude 생성 완료!');
   } catch(e){ showToast('⚠️ API 오류: '+e.message, 4000); }
