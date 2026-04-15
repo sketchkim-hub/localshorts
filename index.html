@@ -1445,18 +1445,28 @@ async function makeMp4(){
 
     // ── 비디오 스트림 ──
     setMp4Progress(55, 'MediaRecorder 준비...');
-    const videoStream = canvas.captureStream(30);
+    const videoStream = canvas.captureStream(24);
     let combinedStream = videoStream;
 
-    // ── 오디오 스트림 연결 (PC AudioContext resume 포함) ──
+    // ── 오디오 스트림 연결 ──
     if(hasAudio && audioEl.src){
       try {
         const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-        // PC Chrome 정책: 사용자 인터랙션 후 resume 필요
         if(audioCtx.state === 'suspended') await audioCtx.resume();
 
-        const resp    = await fetch(audioEl.src);
-        const arrBuf  = await resp.arrayBuffer();
+        // blob URL → fetch 없이 직접 ArrayBuffer로 변환
+        const audioBlob2 = await new Promise((res, rej) => {
+          const xhr = new XMLHttpRequest();
+          xhr.open('GET', audioEl.src, true);
+          xhr.responseType = 'blob';
+          xhr.timeout = 5000;
+          xhr.onload  = () => res(xhr.response);
+          xhr.onerror = () => rej(new Error('XHR 오류'));
+          xhr.ontimeout = () => rej(new Error('오디오 로드 타임아웃'));
+          xhr.send();
+        });
+
+        const arrBuf  = await audioBlob2.arrayBuffer();
         const decoded = await audioCtx.decodeAudioData(arrBuf);
         const src     = audioCtx.createBufferSource();
         src.buffer    = decoded;
@@ -1467,6 +1477,7 @@ async function makeMp4(){
         setMp4Progress(60, '음성 연결 완료...');
       } catch(ae){
         console.warn('오디오 연결 실패, 무음으로 진행:', ae);
+        setMp4Progress(60, '⚠️ 무음으로 진행...');
       }
     }
 
