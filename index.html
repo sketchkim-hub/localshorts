@@ -761,13 +761,32 @@ input[type="range"]{flex:1;accent-color:var(--accent);}
     <div class="section-label">🎬 MP4 동영상 만들기</div>
     <div class="card" style="text-align:center;padding:20px">
       <div style="font-size:36px;margin-bottom:8px">🎬</div>
-      <div style="font-weight:700;font-size:15px;margin-bottom:6px">쇼츠 MP4 다운로드</div>
-      <div style="font-size:11px;color:var(--text2);margin-bottom:16px;line-height:1.7">
-        뉴스 카드 이미지 + 음성을 합쳐서<br>
-        유튜브 쇼츠용 세로형 MP4로 저장합니다<br>
+      <div style="font-weight:700;font-size:15px;margin-bottom:6px">MP4 다운로드</div>
+      <div style="font-size:11px;color:var(--text2);margin-bottom:14px;line-height:1.7">
+        뉴스 카드 이미지 + 음성을 합쳐서 MP4로 저장합니다<br>
         <span style="color:var(--accent3)">음성 탭에서 TTS를 먼저 생성해 주세요</span>
       </div>
 
+      <!-- 화면 비율 선택 -->
+      <div style="margin-bottom:12px">
+        <div style="font-size:11px;color:var(--text2);margin-bottom:7px;font-weight:700;letter-spacing:0.5px">📐 화면 비율</div>
+        <div style="display:flex;gap:8px;justify-content:center">
+          <div class="ratio-opt selected" id="ratio-vertical" onclick="setRatio('vertical')"
+            style="flex:1;max-width:130px;padding:12px 8px;border-radius:10px;border:2px solid var(--accent);background:rgba(255,59,92,0.1);cursor:pointer;transition:all 0.2s;text-align:center">
+            <div style="font-size:28px;margin-bottom:4px">📱</div>
+            <div style="font-size:12px;font-weight:700;color:var(--accent)">세로형 (쇼츠)</div>
+            <div style="font-size:10px;color:var(--text2);margin-top:2px">9:16 · 1080×1920</div>
+          </div>
+          <div class="ratio-opt" id="ratio-horizontal" onclick="setRatio('horizontal')"
+            style="flex:1;max-width:130px;padding:12px 8px;border-radius:10px;border:2px solid var(--border);background:var(--surface);cursor:pointer;transition:all 0.2s;text-align:center">
+            <div style="font-size:28px;margin-bottom:4px">🖥️</div>
+            <div style="font-size:12px;font-weight:700;color:var(--text2)">가로형 (유튜브)</div>
+            <div style="font-size:10px;color:var(--text2);margin-top:2px">16:9 · 1920×1080</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 재생 시간 -->
       <div style="display:flex;gap:6px;margin-bottom:12px;justify-content:center;flex-wrap:wrap">
         <div class="mp4-opt selected" id="dur-auto" onclick="setDur('auto')">⏱ 음성 길이 자동</div>
         <div class="mp4-opt" id="dur-15" onclick="setDur(15)">15초</div>
@@ -1844,12 +1863,35 @@ function toggleSubtitleStyle(){
 }
 let mp4DurSetting = 'auto';
 let mp4Blob = null;
+let videoRatio = 'vertical'; // 'vertical' | 'horizontal'
 
 function setDur(val){
   mp4DurSetting = val;
   document.querySelectorAll('.mp4-opt').forEach(el=>el.classList.remove('selected'));
   const id = val==='auto' ? 'dur-auto' : 'dur-'+val;
   document.getElementById(id)?.classList.add('selected');
+}
+
+function setRatio(ratio){
+  videoRatio = ratio;
+  // 버튼 스타일 업데이트
+  const vBtn = document.getElementById('ratio-vertical');
+  const hBtn = document.getElementById('ratio-horizontal');
+  if(ratio === 'vertical'){
+    vBtn.style.borderColor = 'var(--accent)';
+    vBtn.style.background  = 'rgba(255,59,92,0.1)';
+    vBtn.querySelector('div:nth-child(2)').style.color = 'var(--accent)';
+    hBtn.style.borderColor = 'var(--border)';
+    hBtn.style.background  = 'var(--surface)';
+    hBtn.querySelector('div:nth-child(2)').style.color = 'var(--text2)';
+  } else {
+    hBtn.style.borderColor = 'var(--accent)';
+    hBtn.style.background  = 'rgba(255,59,92,0.1)';
+    hBtn.querySelector('div:nth-child(2)').style.color = 'var(--accent)';
+    vBtn.style.borderColor = 'var(--border)';
+    vBtn.style.background  = 'var(--surface)';
+    vBtn.querySelector('div:nth-child(2)').style.color = 'var(--text2)';
+  }
 }
 
 async function makeMp4(){
@@ -1873,13 +1915,20 @@ async function makeMp4(){
   setMp4Progress(5, '뉴스 카드 렌더링 중...');
 
   try {
-    const W = 1080, H = 1920;
+    // 화면 비율에 따라 캔버스 크기 결정
+    const isHorizontal = videoRatio === 'horizontal';
+    const W = isHorizontal ? 1920 : 1080;
+    const H = isHorizontal ? 1080 : 1920;
     const canvas = document.createElement('canvas');
     canvas.width = W; canvas.height = H;
     const ctx = canvas.getContext('2d');
 
     // 배경+뉴스카드 한 번 그리기
-    await drawNewsCard(ctx, W, H);
+    if(isHorizontal){
+      await drawNewsCardHorizontal(ctx, W, H, preloadedImgs[0]||null);
+    } else {
+      await drawNewsCard(ctx, W, H);
+    }
     setMp4Progress(25, '배경 렌더링 완료...');
 
     // Claude로 자막 타임스탬프 생성
@@ -2030,7 +2079,11 @@ async function makeMp4(){
     const bgFrames = []; // 각 사진별 배경 이미지데이터 캐시
     setMp4Progress(65, '프레임 준비 중...');
     for(let pi=0; pi < Math.max(photoCount,1); pi++){
-      await drawNewsCardWithPhoto(ctx, W, H, preloadedImgs[pi] || null);
+      if(isHorizontal){
+        await drawNewsCardHorizontal(ctx, W, H, preloadedImgs[pi]||null);
+      } else {
+        await drawNewsCardWithPhoto(ctx, W, H, preloadedImgs[pi]||null);
+      }
       bgFrames.push(ctx.getImageData(0, 0, W, H));
     }
 
@@ -2153,13 +2206,19 @@ function drawSubtitle(ctx, text, W, H, color, hasBg, hasStroke){
   const totalH = visibleLines.length * lineH;
   const pad    = 24;
 
-  // ★ 자막 위치: 채널명(100px) 아래 ~ 사진(H*0.28) 위 공간 가운데
-  // 채널명 끝: ~130px, 사진 시작: H*0.28 ≈ 538px
-  // 가운데: (130 + 538) / 2 = 334px
-  const photoTop = S.layout === 'none' ? H : Math.round(H * 0.28);
-  const zoneTop  = 140;
-  const zoneBot  = photoTop - 20;
-  const baseY    = Math.round((zoneTop + zoneBot) / 2) - totalH/2 + fontSize;
+  // ★ 자막 위치: 비율에 따라 다르게
+  const isH = videoRatio === 'horizontal';
+  let baseY;
+  if(isH){
+    // 가로형: 하단 티커 위
+    baseY = H - 160 - totalH;
+  } else {
+    // 세로형: 채널명 아래 ~ 사진 위 공간 가운데
+    const photoTop = S.layout === 'none' ? H : Math.round(H * 0.28);
+    const zoneTop  = 140;
+    const zoneBot  = photoTop - 20;
+    baseY    = Math.round((zoneTop + zoneBot) / 2) - totalH/2 + fontSize;
+  }
 
   if(hasBg){
     const maxW = Math.max(...visibleLines.map(l => ctx.measureText(l).width));
@@ -2268,6 +2327,128 @@ async function convertWebmToMp4(webmBlob){
   }
 
   if(btn) btn.textContent = origText;
+}
+
+// ── 가로형 (16:9) 뉴스카드 렌더링 ──
+async function drawNewsCardHorizontal(ctx, W, H, img){
+  const tpl = S.template;
+
+  // 배경
+  const gradMap = {
+    breaking:['#1a0010','#3d0020','#1a0010'], soft:['#0a1628','#162040'],
+    bold:['#111','#222'], gradient:['#0d2b1f','#091a30'],
+    minimal:['#f8f8f3','#f0f0eb'], neon:['#050510','#0a0a20'],
+  };
+  const colors = gradMap[tpl]||gradMap.breaking;
+  const grd = ctx.createLinearGradient(0,0,W,0); // 가로 그라데이션
+  colors.forEach((c,i)=>grd.addColorStop(i/(colors.length-1),c));
+  ctx.fillStyle = grd;
+  ctx.fillRect(0,0,W,H);
+
+  const palette = {
+    breaking:{bar:'#ff3b5c',cat:'#ff3b5c',title:'#ffffff',body:'rgba(255,255,255,0.75)',logo:'#ffffff'},
+    soft:    {bar:'#4d9fff',cat:'#4d9fff',title:'#ffffff',body:'rgba(255,255,255,0.65)',logo:'#ffffff'},
+    bold:    {bar:'#ffffff',cat:'#ffffff',title:'#ffffff',body:'rgba(255,255,255,0.65)',logo:'#ffffff'},
+    gradient:{bar:'#00d4aa',cat:'#00d4aa',title:'#ffffff',body:'rgba(255,255,255,0.65)',logo:'#ffffff'},
+    minimal: {bar:'#222',   cat:'#888',   title:'#111',   body:'#555',                logo:'#111'},
+    neon:    {bar:'#b830ff',cat:'#b830ff',title:'#ffffff',body:'rgba(255,255,255,0.6)',logo:'#b830ff'},
+  };
+  const p = palette[tpl]||palette.breaking;
+
+  // 레이아웃: 왼쪽 사진(60%) / 오른쪽 텍스트(40%)
+  const splitX = Math.round(W * 0.58);
+  const margin = 48;
+
+  // 왼쪽 — 사진
+  if(img){
+    try {
+      ctx.save();
+      roundRect(ctx, margin, margin, splitX - margin*2, H - margin*2, 32);
+      ctx.clip();
+      const ir=img.width/img.height, cr=(splitX-margin*2)/(H-margin*2);
+      let sw,sh,sx,sy;
+      if(ir>cr){sh=img.height;sw=sh*cr;sx=(img.width-sw)/2;sy=0;}
+      else{sw=img.width;sh=sw/cr;sx=0;sy=(img.height-sh)/2;}
+      ctx.drawImage(img,sx,sy,sw,sh, margin,margin, splitX-margin*2, H-margin*2);
+      ctx.restore();
+    } catch(e){}
+  } else {
+    ctx.fillStyle='rgba(255,255,255,0.06)';
+    roundRect(ctx,margin,margin,splitX-margin*2,H-margin*2,32);
+    ctx.fill();
+  }
+
+  // 오른쪽 — 텍스트 영역
+  const tx = splitX + 60;
+  const tw = W - tx - 60;
+  let ty = 120;
+
+  // 채널명
+  ctx.fillStyle = p.logo;
+  ctx.font = `bold 48px 'Noto Sans KR', sans-serif`;
+  ctx.textAlign = 'left';
+  ctx.fillText(S.channel||'e-빠른뉴스', tx, ty);
+  ty += 70;
+
+  // 날짜
+  const now=new Date();
+  const dateStr=(now.getMonth()+1)+'/'+now.getDate()+' '+now.getHours()+':'+String(now.getMinutes()).padStart(2,'0');
+  ctx.fillStyle='rgba(255,255,255,0.4)';
+  ctx.font='34px sans-serif';
+  ctx.fillText(dateStr, tx, ty);
+  ty += 60;
+
+  // 구분선
+  ctx.fillStyle = p.bar;
+  ctx.fillRect(tx, ty, tw, 6);
+  ty += 40;
+
+  // 카테고리
+  ctx.fillStyle = p.cat;
+  ctx.font = `bold 40px sans-serif`;
+  ty += 44;
+  ctx.fillText((S.category||'속보').toUpperCase(), tx, ty);
+  ty += 20;
+
+  // 헤드라인
+  ctx.fillStyle = p.title;
+  const hlSize = Math.max(52, Math.min(80, parseInt(S.hSize||20)*3));
+  ctx.font = `bold ${hlSize}px 'Noto Sans KR', sans-serif`;
+  ty += hlSize + 10;
+  ty = wrapTextH(ctx, S.headline||'헤드라인', tx, ty, tw, hlSize*1.35);
+  ty += 24;
+
+  // 본문
+  ctx.fillStyle = p.body;
+  const bSize = Math.max(28, Math.min(44, parseInt(S.bSize||11)*3));
+  ctx.font = `${bSize}px 'Noto Sans KR', sans-serif`;
+  wrapTextH(ctx, S.body||'', tx, ty, tw, bSize*1.6);
+
+  // 티커 (하단)
+  if(S.ticker){
+    ctx.fillStyle='rgba(0,0,0,0.55)';
+    roundRect(ctx, margin, H-80, W-margin*2, 56, 10);
+    ctx.fill();
+    ctx.fillStyle='rgba(255,255,255,0.85)';
+    ctx.font='30px sans-serif';
+    ctx.textAlign='left';
+    ctx.fillText('▶ '+S.ticker, margin+20, H-44);
+  }
+}
+
+// 가로형용 wrapText (반환값: 다음 줄 Y)
+function wrapTextH(ctx, text, x, y, maxW, lineH){
+  if(!text) return y;
+  const words=text.split('');
+  let line='', cy=y;
+  for(let i=0;i<words.length;i++){
+    const test=line+words[i];
+    if(ctx.measureText(test).width>maxW&&line){
+      ctx.fillText(line,x,cy); line=words[i]; cy+=lineH;
+    } else line=test;
+  }
+  if(line){ctx.fillText(line,x,cy); cy+=lineH;}
+  return cy;
 }
 
 // 뉴스 카드를 Canvas에 그리기 (기본 — 선택된 사진 사용)
