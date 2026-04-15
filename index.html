@@ -613,9 +613,9 @@ input[type="range"]{flex:1;accent-color:var(--accent);}
     <audio id="generatedAudio" controls></audio>
 
     <!-- 자막 미리보기 -->
-    <div id="subtitlePreview" style="margin:10px 0;min-height:64px;background:#000;border-radius:10px;display:flex;align-items:center;justify-content:center;padding:12px 16px;position:relative;">
-      <div id="subtitleText" style="color:#fff;font-size:18px;font-weight:700;text-align:center;line-height:1.5;font-family:'Noto Sans KR',sans-serif;text-shadow:2px 2px 4px rgba(0,0,0,0.8);letter-spacing:-0.3px;">
-        ▶ 재생하면 자막이 여기에 표시됩니다
+    <div id="subtitlePreview" style="margin:10px 0;min-height:64px;background:#111;border-radius:10px;display:flex;align-items:flex-start;justify-content:center;padding:14px 16px 10px;position:relative;border:1px solid var(--border)">
+      <div id="subtitleText" style="color:#fff;font-size:17px;font-weight:700;text-align:center;line-height:1.5;font-family:'Noto Sans KR',sans-serif;text-shadow:2px 2px 4px rgba(0,0,0,0.8);letter-spacing:-0.3px;">
+        ▶ 재생하면 자막이 여기에 표시됩니다<br><span style="font-size:11px;color:var(--text2);font-weight:400">(영상 상단에 위치)</span>
       </div>
     </div>
 
@@ -1252,41 +1252,73 @@ async function exportAct(type){
 function finalPublish(){showToast('🚀 유튜브 스튜디오에서 업로드하세요!');}
 
 // ════════ 자막 싱크 시스템 ════════
-let subtitleCues = [];    // [{start, end, text}]
-let subtitleTimer = null;
+let subtitleCues = [];
 let subStyleIdx = 0;
 const SUB_STYLES = ['흰색','노란색','민트 네온','검정 박스','레드 아웃라인'];
 
+// Claude API로 정밀 타임스탬프 생성
+async function buildCuesWithClaude(text, totalDur){
+  const aKey = getKey('anthropic');
+  if(!aKey || !text || !totalDur) return splitToSubtitles(text, totalDur);
+
+  const prompt = `다음 한국어 TTS 대본을 ${totalDur}초 음성으로 읽는다고 가정하고,
+6어절 이하 단위로 나눠서 각 구간의 시작/종료 시간을 계산해 주세요.
+평균 한국어 읽기 속도(분당 약 300자)를 기준으로 글자 수에 비례해 시간을 배분하세요.
+
+대본:
+${text}
+
+JSON 배열만 출력 (설명 없이):
+[{"start":0.0,"end":2.3,"text":"첫번째 자막"},{"start":2.3,"end":4.8,"text":"두번째 자막"},...]`;
+
+  try {
+    const res = await fetch('https://api.anthropic.com/v1/messages',{
+      method:'POST',
+      headers:{
+        'Content-Type':'application/json',
+        'x-api-key': aKey,
+        'anthropic-version':'2023-06-01',
+        'anthropic-dangerous-direct-browser-access':'true'
+      },
+      body: JSON.stringify({
+        model:'claude-haiku-4-5-20251001',
+        max_tokens:2000,
+        messages:[{role:'user', content:prompt}]
+      })
+    });
+    const data = await res.json();
+    if(!res.ok) throw new Error('Claude 타임스탬프 오류');
+    const raw = data.content?.[0]?.text?.trim()||'[]';
+    const clean = raw.replace(/^```[\w\s]*\n?/m,'').replace(/\n?```\s*$/m,'').trim();
+    const cues = JSON.parse(clean);
+    if(Array.isArray(cues) && cues.length > 0){
+      console.log(`✅ Claude 타임스탬프 ${cues.length}개 생성`);
+      return cues;
+    }
+  } catch(e){ console.warn('Claude 타임스탬프 실패, 기본 방식 사용:', e); }
+
+  return splitToSubtitles(text, totalDur);
+}
+
 function splitToSubtitles(text, totalDur){
-  // 문장 단위로 분리 후 6단어(어절) 기준으로 청크
   if(!text||!totalDur) return [];
-
-  // 줄바꿈·마침표 기준 문장 분리
-  const sentences = text
-    .replace(/\n+/g,' ')
-    .split(/(?<=[.!?。])\s+|(?<=다\.|습니다\.)\s+/)
-    .map(s=>s.trim())
-    .filter(s=>s.length>0);
-
-  // 각 문장을 6어절 이하 청크로 분할
+  const sentences = text.replace(/\n+/g,' ')
+    .split(/(?<=[.!?。])\s+/)
+    .map(s=>s.trim()).filter(s=>s.length>0);
   const chunks = [];
   for(const sent of sentences){
     const words = sent.split(/\s+/);
-    for(let i=0;i<words.length;i+=6){
-      const chunk = words.slice(i, i+6).join(' ');
+    for(let i=0;i<words.length;i+=5){
+      const chunk = words.slice(i,i+5).join(' ');
       if(chunk.trim()) chunks.push(chunk.trim());
     }
   }
-
-  if(chunks.length === 0) return [];
-
-  // 총 글자 수 기준으로 시간 배분
-  const totalChars = chunks.reduce((s,c)=>s+c.length, 0);
+  if(!chunks.length) return [{start:0, end:totalDur, text:text.slice(0,30)}];
+  const totalChars = chunks.reduce((s,c)=>s+c.length,0);
   let cursor = 0;
   return chunks.map(chunk=>{
-    const ratio = chunk.length / totalChars;
-    const dur   = totalDur * ratio;
-    const cue   = { start: cursor, end: cursor + dur, text: chunk };
+    const dur = totalDur * (chunk.length/totalChars);
+    const cue = {start:cursor, end:cursor+dur, text:chunk};
     cursor += dur;
     return cue;
   });
@@ -1295,20 +1327,16 @@ function splitToSubtitles(text, totalDur){
 function setupSubtitleSync(){
   const audio = document.getElementById('generatedAudio');
   if(!audio) return;
-
-  // 오디오 메타데이터 로드 후 자막 생성
-  const prepare = () => {
+  const prepare = async () => {
     const text = document.getElementById('ttsText').value ||
-      (document.getElementById('headline').value + '. ' + document.getElementById('bodyText').value);
+      (document.getElementById('headline').value+'. '+document.getElementById('bodyText').value);
     const dur = audio.duration && isFinite(audio.duration) ? audio.duration : 30;
-    subtitleCues = splitToSubtitles(text, dur);
-    console.log(`자막 ${subtitleCues.length}개 생성, 총 ${dur.toFixed(1)}초`);
+    // Claude로 정밀 타임스탬프 생성
+    subtitleCues = await buildCuesWithClaude(text, dur);
+    console.log(`자막 ${subtitleCues.length}개, 총 ${dur.toFixed(1)}초`);
   };
-
   if(audio.readyState >= 1) prepare();
   else audio.addEventListener('loadedmetadata', prepare, {once:true});
-
-  // timeupdate 로 자막 표시
   audio.removeEventListener('timeupdate', onAudioTime);
   audio.addEventListener('timeupdate', onAudioTime);
   audio.addEventListener('ended', ()=>setSubtitle(''));
@@ -1417,6 +1445,19 @@ async function makeMp4(){
       } catch(ae){ console.warn('오디오 연결 실패:', ae); }
     }
 
+    // Claude로 자막 타임스탬프 생성
+    setMp4Progress(50, '🟠 Claude 자막 싱크 계산 중...');
+    const ttsText = document.getElementById('ttsText').value ||
+      (document.getElementById('headline').value + '. ' + document.getElementById('bodyText').value);
+    const cues = await buildCuesWithClaude(ttsText, durationSec);
+
+    const subColors  = ['#ffffff','#ffff00','#00ffcc','#ffffff','#ffffff'];
+    const subBgFlags = [false, false, false, true, false];
+    const subStrFlags= [false, false, false, false, true];
+    const sc       = subColors[subStyleIdx]  || '#ffffff';
+    const hasBg    = subBgFlags[subStyleIdx];
+    const hasStroke= subStrFlags[subStyleIdx];
+
     const mimeType = getSupportedMime();
     const recorder = new MediaRecorder(combinedStream, {
       mimeType, videoBitsPerSecond: 5000000
@@ -1424,40 +1465,47 @@ async function makeMp4(){
     const chunks = [];
     recorder.ondataavailable = e => { if(e.data.size>0) chunks.push(e.data); };
 
-    // 배경 이미지 데이터 저장 (자막 영역 제외한 베이스)
     const bgImageData = ctx.getImageData(0, 0, W, H);
 
+    setMp4Progress(55, '녹화 시작...');
+
+    // ★ setTimeout 기반 정밀 타이머 (rAF 대신 — 백그라운드에서도 정확)
     await new Promise((resolve, reject) => {
       recorder.onstop = resolve;
       recorder.onerror = reject;
-      recorder.start(100);
+      recorder.start(200);
 
-      const FPS = 30;
-      let frame = 0;
-      const totalFrames = durationSec * FPS;
+      const startTime = performance.now();
+      const FRAME_MS  = 1000 / 30; // 30fps = 33ms
 
       const renderFrame = () => {
-        if(frame >= totalFrames){ recorder.stop(); return; }
-        const elapsed = frame / FPS;
+        const elapsed = (performance.now() - startTime) / 1000; // 실제 경과 초
 
-        // 매 프레임 배경 복원
+        if(elapsed >= durationSec){
+          recorder.stop();
+          return;
+        }
+
+        // 배경 복원
         ctx.putImageData(bgImageData, 0, 0);
 
-        // 현재 자막 찾아서 그리기
+        // 자막 그리기
         const cue = cues.find(c => elapsed >= c.start && elapsed < c.end);
         if(cue && cue.text){
           drawSubtitle(ctx, cue.text, W, H, sc, hasBg, hasStroke);
         }
 
-        frame++;
-        if(frame % FPS === 0){
-          const sec = Math.floor(frame/FPS);
-          setMp4Progress(45 + Math.round((sec/durationSec)*50),
-            `녹화 중... ${sec}/${durationSec}초`);
+        // 진행률 업데이트
+        const pct = 55 + Math.round((elapsed / durationSec) * 40);
+        if(Math.round(elapsed * 2) % 2 === 0){ // 0.5초마다 업데이트
+          setMp4Progress(Math.min(pct, 94),
+            `녹화 중... ${elapsed.toFixed(1)}/${durationSec}초`);
         }
-        requestAnimationFrame(renderFrame);
+
+        setTimeout(renderFrame, FRAME_MS);
       };
-      requestAnimationFrame(renderFrame);
+
+      setTimeout(renderFrame, FRAME_MS);
     });
 
     setMp4Progress(97, 'MP4 파일 생성 중...');
@@ -1485,7 +1533,7 @@ function getSupportedMime(){
   return 'video/webm';
 }
 
-// 캔버스에 자막 그리기
+// 캔버스에 자막 그리기 — 상단 위치
 function drawSubtitle(ctx, text, W, H, color, hasBg, hasStroke){
   if(!text) return;
   const fontSize = 72;
@@ -1493,29 +1541,30 @@ function drawSubtitle(ctx, text, W, H, color, hasBg, hasStroke){
   ctx.font = `bold ${fontSize}px 'Noto Sans KR', sans-serif`;
   ctx.textAlign = 'center';
 
-  // 두 줄로 분할 (너무 길면)
+  // 5어절 이하로 두 줄 분할
   const words = text.split(' ');
   const lines = [];
   let line = '';
   for(const w of words){
     const test = line ? line+' '+w : w;
-    if(ctx.measureText(test).width > W - 120 && line){
+    if(ctx.measureText(test).width > W - 160 && line){
       lines.push(line); line = w;
     } else { line = test; }
   }
   if(line) lines.push(line);
 
-  const lineH  = fontSize * 1.4;
+  const lineH = fontSize * 1.35;
   const totalH = lines.length * lineH;
-  const baseY  = H - 260 - totalH; // 하단에서 260px 위
+
+  // ★ 상단 배치: 채널명(100px) 아래 여백(60px) + 자막
+  const baseY = 200;
 
   if(hasBg){
-    // 검정 반투명 박스
     const maxW = Math.max(...lines.map(l=>ctx.measureText(l).width));
-    const pad = 24;
-    ctx.fillStyle = 'rgba(0,0,0,0.75)';
-    roundRect(ctx, W/2 - maxW/2 - pad, baseY - fontSize - pad/2,
-              maxW + pad*2, totalH + pad, 16);
+    const pad = 28;
+    ctx.fillStyle = 'rgba(0,0,0,0.78)';
+    roundRect(ctx, W/2 - maxW/2 - pad, baseY - fontSize,
+              maxW + pad*2, totalH + pad, 18);
     ctx.fill();
   }
 
@@ -1523,12 +1572,11 @@ function drawSubtitle(ctx, text, W, H, color, hasBg, hasStroke){
     const y = baseY + i * lineH;
     if(hasStroke){
       ctx.strokeStyle = '#ff3b5c';
-      ctx.lineWidth = 6;
+      ctx.lineWidth = 7;
       ctx.strokeText(l, W/2, y);
     }
-    // 그림자
-    ctx.shadowColor = 'rgba(0,0,0,0.9)';
-    ctx.shadowBlur = 12;
+    ctx.shadowColor = 'rgba(0,0,0,0.95)';
+    ctx.shadowBlur = 14;
     ctx.shadowOffsetX = 2;
     ctx.shadowOffsetY = 2;
     ctx.fillStyle = color;
