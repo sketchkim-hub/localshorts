@@ -1371,7 +1371,6 @@ function updatePreview(){
         <div class="pv-category pv-${tpl}">${S.category.toUpperCase()}</div>
         <div class="pv-headline pv-${tpl}" style="font-size:${S.hSize}px">${S.headline||'헤드라인을 입력하세요'}</div>
         <div class="pv-sub pv-${tpl}" style="font-size:${S.bSize}px">${S.body||'뉴스 본문 내용이 여기에 표시됩니다.'}</div>
-        <div class="pv-source pv-${tpl}">${S.source?'📌 '+S.source:''}</div>
       </div>
       ${tickerHtml}
     </div>`;
@@ -1980,7 +1979,9 @@ async function makeMp4(){
 
     const mimeType = getSupportedMime();
     const recorder = new MediaRecorder(combinedStream, {
-      mimeType, videoBitsPerSecond: 5000000
+      mimeType,
+      videoBitsPerSecond: 5000000,
+      audioBitsPerSecond: 128000
     });
     const chunks = [];
     recorder.ondataavailable = e => { if(e.data.size>0) chunks.push(e.data); };
@@ -2096,7 +2097,17 @@ async function makeMp4(){
 }
 
 function getSupportedMime(){
-  const types=['video/mp4;codecs=avc1','video/mp4','video/webm;codecs=vp9','video/webm;codecs=vp8','video/webm'];
+  // 오디오 코덱 명시 — 음성 포함 보장
+  const types=[
+    'video/webm;codecs=vp9,opus',
+    'video/webm;codecs=vp8,opus',
+    'video/webm;codecs=opus',
+    'video/webm;codecs=vp9',
+    'video/webm;codecs=vp8',
+    'video/mp4;codecs=avc1',
+    'video/mp4',
+    'video/webm',
+  ];
   for(const t of types){ if(MediaRecorder.isTypeSupported(t)) return t; }
   return 'video/webm';
 }
@@ -2277,12 +2288,8 @@ async function drawNewsCardWithPhoto(ctx, W, H, img){
   ctx.font = `${bSize}px 'Noto Sans KR', sans-serif`;
   wrapText(ctx, S.body||'', 60, textY+300, W-120, bSize*1.5);
 
-  // 출처
-  if(S.source){
-    ctx.fillStyle = p.source;
-    ctx.font = '34px sans-serif';
-    ctx.fillText('📌 '+S.source, 60, H-120);
-  }
+  // 출처 표시 제거 (본문과 겹침 방지)
+  // if(S.source){ ... }
 
   // 티커
   if(S.ticker){
