@@ -207,15 +207,15 @@ input[type="range"]{flex:1;accent-color:var(--accent);}
 /* ── PREVIEW ── */
 .preview-wrapper{display:flex;justify-content:center;padding:16px 0 0;}
 .preview-frame{width:var(--preview-w);height:var(--preview-h);border-radius:18px;overflow:hidden;position:relative;border:2px solid var(--border);box-shadow:0 20px 60px rgba(0,0,0,0.6);flex-shrink:0;}
-.pv-inner{width:100%;height:100%;padding:20px 18px;display:flex;flex-direction:column;position:relative;}
-.pv-photo-zone{flex:1;border-radius:10px;overflow:hidden;margin:12px 0;background:rgba(255,255,255,0.05);display:flex;align-items:center;justify-content:center;font-size:28px;min-height:0;}
+.pv-inner{width:100%;height:100%;padding:14px 16px 36px;display:flex;flex-direction:column;position:relative;box-sizing:border-box;}
+.pv-photo-zone{border-radius:10px;overflow:hidden;margin:8px 0;background:rgba(255,255,255,0.05);display:flex;align-items:center;justify-content:center;font-size:28px;flex-shrink:0;height:42%;}
 .pv-photo-zone img{width:100%;height:100%;object-fit:cover;}
-.pv-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;}
-.pv-logo-area{font-family:'Black Han Sans',sans-serif;font-size:14px;}
+.pv-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;flex-shrink:0;}
+.pv-logo-area{font-family:'Black Han Sans',sans-serif;font-size:13px;}
 .pv-time{font-size:9px;opacity:0.5;}
-.pv-text-zone{padding:0 0 8px;}
-.pv-headline{margin:8px 0 6px;} .pv-sub{margin-bottom:8px;}
-.pv-ticker{position:absolute;bottom:14px;left:18px;right:18px;background:rgba(0,0,0,0.5);border-radius:4px;padding:5px 8px;font-size:9px;color:rgba(255,255,255,0.7);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.pv-text-zone{padding:0;flex-shrink:0;}
+.pv-headline{margin:5px 0 4px;} .pv-sub{margin-bottom:4px;}
+.pv-ticker{position:absolute;bottom:6px;left:16px;right:16px;background:rgba(0,0,0,0.6);border-radius:4px;padding:4px 7px;font-size:9px;color:rgba(255,255,255,0.85);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .pv-breaking{background:linear-gradient(180deg,#1a0010,#3d0020 50%,#1a0010)}
 .pv-breaking .pv-bar{background:var(--accent);height:3px}
 .pv-breaking .pv-category{color:var(--accent);font-family:'Black Han Sans';font-size:11px;letter-spacing:2px}
@@ -1291,7 +1291,11 @@ function updatePreview(){
   const now=new Date();
   const time=now.getHours()+':'+String(now.getMinutes()).padStart(2,'0');
   const date=(now.getMonth()+1)+'/'+now.getDate();
-  const photoHtml=S.layout!=='none'?`<div class="pv-photo-zone">${photo?`<img src="${photo}">`:'🖼️'}</div>`:'';
+  const photoHtml=S.layout!=='none'
+    ?`<div class="pv-photo-zone">${photo?`<img src="${photo}">`:'🖼️'}</div>`
+    :'';
+  const tickerHtml=S.ticker
+    ?`<div class="pv-ticker">▶ ${S.ticker}</div>`:'';
   const fr=document.getElementById('mainPreview');
   if(!fr) return;
   fr.className='preview-frame pv-'+tpl;
@@ -1303,14 +1307,14 @@ function updatePreview(){
       </div>
       <div class="pv-bar pv-${tpl}"></div>
       ${S.layout==='top'?photoHtml:''}
+      ${(S.layout==='middle'||S.layout==='full')?photoHtml:''}
       <div class="pv-text-zone">
         <div class="pv-category pv-${tpl}">${S.category.toUpperCase()}</div>
         <div class="pv-headline pv-${tpl}" style="font-size:${S.hSize}px">${S.headline||'헤드라인을 입력하세요'}</div>
         <div class="pv-sub pv-${tpl}" style="font-size:${S.bSize}px">${S.body||'뉴스 본문 내용이 여기에 표시됩니다.'}</div>
         <div class="pv-source pv-${tpl}">${S.source?'📌 '+S.source:''}</div>
       </div>
-      ${(S.layout==='middle'||S.layout==='full')?photoHtml:''}
-      ${S.ticker?`<div class="pv-ticker">▶ ${S.ticker}</div>`:''}
+      ${tickerHtml}
     </div>`;
 }
 
