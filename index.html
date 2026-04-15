@@ -133,6 +133,10 @@ textarea{line-height:1.6;}
 .audio-result audio{width:100%;margin-bottom:8px;}
 .dl-btn{display:flex;align-items:center;justify-content:center;gap:6px;width:100%;padding:10px;border-radius:8px;background:linear-gradient(135deg,var(--google),#34a853);border:none;color:#fff;font-family:'Noto Sans KR';font-size:13px;font-weight:700;cursor:pointer;}
 
+/* BGM 업로드 */
+.bgm-upload{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px;border:2px dashed var(--border);border-radius:10px;cursor:pointer;transition:all 0.2s;text-align:center;}
+.bgm-upload:hover{border-color:var(--accent3);background:rgba(0,212,170,0.05);}
+
 /* 자막 스타일 */
 .sub-style-0 #subtitleText{color:#fff;text-shadow:2px 2px 6px rgba(0,0,0,0.9);}
 .sub-style-1 #subtitleText{color:#ffff00;text-shadow:2px 2px 6px rgba(0,0,0,0.9);}
@@ -632,6 +636,64 @@ input[type="range"]{flex:1;accent-color:var(--accent);}
   <div class="btn-row" style="margin-top:12px">
     <button class="btn btn-secondary" onclick="switchTab(3)">← 이전</button>
     <button class="btn btn-primary" onclick="switchTab(5)">다음 → 완성</button>
+  </div>
+
+  <!-- 배경음악 섹션 -->
+  <div class="section" style="margin-top:16px">
+    <div class="section-label">🎵 배경음악 (BGM)</div>
+    <div class="card" style="padding:14px">
+
+      <!-- 업로드 -->
+      <label class="bgm-upload" for="bgmInput" id="bgmUploadLabel">
+        <input type="file" id="bgmInput" accept="audio/*,.mp3,.wav,.m4a,.aac" style="display:none" onchange="handleBgm(event)">
+        <div style="font-size:28px;margin-bottom:6px">🎵</div>
+        <div style="font-size:13px;font-weight:700">MP3 파일 선택</div>
+        <div style="font-size:11px;color:var(--text2);margin-top:3px">MP3, WAV, M4A, AAC 지원</div>
+      </label>
+
+      <!-- 로드된 BGM 정보 -->
+      <div id="bgmInfo" style="display:none;margin-top:10px">
+        <div style="display:flex;align-items:center;gap:10px;padding:10px;background:var(--surface);border-radius:8px;border:1px solid var(--border)">
+          <span style="font-size:22px">🎵</span>
+          <div style="flex:1;min-width:0">
+            <div id="bgmName" style="font-size:12px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></div>
+            <div id="bgmDur" style="font-size:10px;color:var(--text2);margin-top:2px"></div>
+          </div>
+          <button onclick="removeBgm()" style="background:rgba(255,59,92,0.15);border:none;color:var(--accent);width:28px;height:28px;border-radius:50%;cursor:pointer;font-size:14px;flex-shrink:0">×</button>
+        </div>
+        <audio id="bgmAudio" style="width:100%;margin-top:8px" controls></audio>
+      </div>
+
+      <!-- 볼륨 조절 -->
+      <div id="bgmControls" style="display:none;margin-top:12px">
+        <div class="slider-row">
+          <span class="slider-label">BGM 볼륨</span>
+          <input type="range" min="0" max="100" value="30" id="bgmVolume"
+            oninput="this.nextElementSibling.textContent=this.value+'%';updateBgmPreview()">
+          <span class="slider-val">30%</span>
+        </div>
+        <div class="slider-row">
+          <span class="slider-label">TTS 볼륨</span>
+          <input type="range" min="0" max="100" value="100" id="ttsVolume"
+            oninput="this.nextElementSibling.textContent=this.value+'%'">
+          <span class="slider-val">100%</span>
+        </div>
+        <div style="display:flex;gap:6px;margin-top:8px">
+          <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
+            <input type="checkbox" id="bgmLoop" checked style="accent-color:var(--accent3)">
+            <span>BGM 반복 재생</span>
+          </label>
+          <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;margin-left:12px">
+            <input type="checkbox" id="bgmFadeOut" checked style="accent-color:var(--accent3)">
+            <span>끝에서 페이드아웃</span>
+          </label>
+        </div>
+        <div style="font-size:11px;color:var(--accent3);margin-top:8px;padding:8px;background:rgba(0,212,170,0.07);border-radius:6px">
+          ✅ MP4 생성 시 TTS 음성 + BGM이 자동 믹싱됩니다
+        </div>
+      </div>
+
+    </div>
   </div>
 </div>
 
@@ -1267,7 +1329,56 @@ async function exportAct(type){
 }
 function finalPublish(){showToast('🚀 유튜브 스튜디오에서 업로드하세요!');}
 
-// ════════ 자막 싱크 시스템 ════════
+// ════════ BGM (배경음악) ════════
+let bgmBlob = null;
+let bgmObjectUrl = null;
+
+function handleBgm(e){
+  const file = e.target.files[0];
+  if(!file) return;
+  if(bgmObjectUrl) URL.revokeObjectURL(bgmObjectUrl);
+
+  bgmBlob = file;
+  bgmObjectUrl = URL.createObjectURL(file);
+
+  // 오디오 엘리먼트 설정
+  const bgmAudio = document.getElementById('bgmAudio');
+  bgmAudio.src = bgmObjectUrl;
+
+  // 파일명 표시
+  document.getElementById('bgmName').textContent = file.name;
+
+  // 재생 시간 표시
+  bgmAudio.onloadedmetadata = () => {
+    const d = bgmAudio.duration;
+    const m = Math.floor(d/60), s = Math.floor(d%60);
+    document.getElementById('bgmDur').textContent =
+      `${isFinite(d) ? m+'분 '+String(s).padStart(2,'0')+'초' : '길이 불명'} · ${(file.size/1024/1024).toFixed(1)}MB`;
+  };
+
+  // UI 표시
+  document.getElementById('bgmInfo').style.display = 'block';
+  document.getElementById('bgmControls').style.display = 'block';
+  document.getElementById('bgmUploadLabel').style.display = 'none';
+  showToast('🎵 BGM 등록 완료!');
+}
+
+function removeBgm(){
+  bgmBlob = null;
+  if(bgmObjectUrl){ URL.revokeObjectURL(bgmObjectUrl); bgmObjectUrl = null; }
+  document.getElementById('bgmAudio').src = '';
+  document.getElementById('bgmInfo').style.display = 'none';
+  document.getElementById('bgmControls').style.display = 'none';
+  document.getElementById('bgmUploadLabel').style.display = 'flex';
+  document.getElementById('bgmInput').value = '';
+  showToast('🎵 BGM 제거됨');
+}
+
+function updateBgmPreview(){
+  const vol = parseInt(document.getElementById('bgmVolume').value) / 100;
+  const bgmAudio = document.getElementById('bgmAudio');
+  if(bgmAudio) bgmAudio.volume = vol;
+}
 let subtitleCues = [];
 let subStyleIdx = 0;
 const SUB_STYLES = ['흰색','노란색','민트 네온','검정 박스','레드 아웃라인'];
@@ -1444,39 +1555,75 @@ async function makeMp4(){
     const hasStroke= subStrFlags[subStyleIdx];
 
     // ── 비디오 스트림 ──
-    setMp4Progress(55, 'MediaRecorder 준비...');
+    setMp4Progress(55, '스트림 준비...');
     const videoStream = canvas.captureStream(24);
     let combinedStream = videoStream;
 
-    // ── 오디오 스트림 연결 ──
-    if(hasAudio && audioEl.src){
+    // ── 오디오 믹싱 (TTS + BGM) ──
+    let audioForRecord = null;
+    const hasBgm = !!bgmBlob;
+
+    if(hasAudio || hasBgm){
       try {
         const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
         if(audioCtx.state === 'suspended') await audioCtx.resume();
 
-        // blob URL → fetch 없이 직접 ArrayBuffer로 변환
-        const audioBlob2 = await new Promise((res, rej) => {
-          const xhr = new XMLHttpRequest();
-          xhr.open('GET', audioEl.src, true);
-          xhr.responseType = 'blob';
-          xhr.timeout = 5000;
-          xhr.onload  = () => res(xhr.response);
-          xhr.onerror = () => rej(new Error('XHR 오류'));
-          xhr.ontimeout = () => rej(new Error('오디오 로드 타임아웃'));
-          xhr.send();
-        });
+        const dest = audioCtx.createMediaStreamDestination();
+        const ttsVol = parseInt(document.getElementById('ttsVolume')?.value || 100) / 100;
+        const bgmVol = parseInt(document.getElementById('bgmVolume')?.value || 30) / 100;
+        const bgmLoop = document.getElementById('bgmLoop')?.checked ?? true;
+        const bgmFade = document.getElementById('bgmFadeOut')?.checked ?? true;
 
-        const arrBuf  = await audioBlob2.arrayBuffer();
-        const decoded = await audioCtx.decodeAudioData(arrBuf);
-        const src     = audioCtx.createBufferSource();
-        src.buffer    = decoded;
-        const dest    = audioCtx.createMediaStreamDestination();
-        src.connect(dest);
-        src.start(0);
+        // ① TTS 음성 연결
+        if(hasAudio && audioEl.src){
+          try {
+            audioForRecord = new Audio(audioEl.src);
+            audioForRecord.crossOrigin = 'anonymous';
+            const ttsSource = audioCtx.createMediaElementSource(audioForRecord);
+            const ttsGain   = audioCtx.createGain();
+            ttsGain.gain.value = ttsVol;
+            ttsSource.connect(ttsGain);
+            ttsGain.connect(dest);
+            ttsGain.connect(audioCtx.destination);
+          } catch(e){ console.warn('TTS 연결 실패:', e); audioForRecord = null; }
+        }
+
+        // ② BGM 연결
+        if(hasBgm && bgmObjectUrl){
+          try {
+            const bgmEl = new Audio(bgmObjectUrl);
+            bgmEl.loop = bgmLoop;
+            bgmEl.crossOrigin = 'anonymous';
+            const bgmSource = audioCtx.createMediaElementSource(bgmEl);
+            const bgmGain   = audioCtx.createGain();
+            bgmGain.gain.value = bgmVol;
+
+            // 페이드아웃 — 마지막 3초
+            if(bgmFade && durationSec > 4){
+              const fadeStart = durationSec - 3;
+              bgmGain.gain.setValueAtTime(bgmVol, audioCtx.currentTime + fadeStart);
+              bgmGain.gain.linearRampToValueAtTime(0, audioCtx.currentTime + durationSec);
+            }
+
+            bgmSource.connect(bgmGain);
+            bgmGain.connect(dest);
+            bgmGain.connect(audioCtx.destination);
+
+            // BGM 재생 시작 (녹화 시작 직전에)
+            setTimeout(() => {
+              bgmEl.currentTime = 0;
+              bgmEl.play().catch(e => console.warn('BGM 재생 실패:', e));
+            }, 100);
+
+          } catch(e){ console.warn('BGM 연결 실패:', e); }
+        }
+
+        // 믹싱된 스트림 추가
         dest.stream.getAudioTracks().forEach(t => combinedStream.addTrack(t));
-        setMp4Progress(60, '음성 연결 완료...');
+        setMp4Progress(60, hasBgm ? '🎵 TTS + BGM 믹싱 완료...' : '음성 연결 완료...');
+
       } catch(ae){
-        console.warn('오디오 연결 실패, 무음으로 진행:', ae);
+        console.warn('오디오 믹싱 실패, 무음:', ae);
         setMp4Progress(60, '⚠️ 무음으로 진행...');
       }
     }
@@ -1512,11 +1659,17 @@ async function makeMp4(){
 
     setMp4Progress(70, '녹화 시작...');
 
-    // ★ setInterval 기반 정밀 루프 (setTimeout 재귀 → 스택 누적 멈춤 방지)
+    // ★ setInterval 기반 정밀 루프
     await new Promise((resolve, reject) => {
       recorder.onstop = resolve;
       recorder.onerror = e => reject(e);
       recorder.start(200);
+
+      // 오디오 동기 재생 시작
+      if(audioForRecord){
+        audioForRecord.currentTime = 0;
+        audioForRecord.play().catch(e => console.warn('오디오 재생 실패:', e));
+      }
 
       const startTime = performance.now();
       const FRAME_MS  = 1000 / 24; // 24fps — 안정성 우선
@@ -1527,6 +1680,7 @@ async function makeMp4(){
 
         if(elapsed >= durationSec){
           clearInterval(intervalId);
+          if(audioForRecord){ audioForRecord.pause(); audioForRecord.currentTime = 0; }
           recorder.stop();
           return;
         }
