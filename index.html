@@ -300,7 +300,8 @@ input[type="range"]{flex:1;accent-color:var(--accent);}
     <div class="key-row">
       <div class="key-label">🟠 Anthropic API Key <span style="background:rgba(217,119,6,0.15);color:var(--claude);font-size:9px;padding:2px 6px;border-radius:8px;font-weight:700;">AI 뉴스생성 · 대본</span></div>
       <div class="key-wrap">
-        <input type="password" id="anthropicKey" placeholder="sk-ant-api03-..." oninput="saveKey('anthropic')">
+        <input type="password" id="anthropicKey" placeholder="sk-ant-api03-..."
+          onblur="saveKey('anthropic')" onpaste="setTimeout(()=>saveKey('anthropic'),100)">
         <button class="key-toggle" onclick="toggleVis('anthropicKey',this)">👁</button>
       </div>
       <div class="key-status s-empty" id="anthropicStatus">⬜ 키 없음</div>
@@ -314,7 +315,8 @@ input[type="range"]{flex:1;accent-color:var(--accent);}
     <div class="key-row">
       <div class="key-label">🔵 Google Cloud API Key <span style="background:rgba(66,133,244,0.15);color:var(--google);font-size:9px;padding:2px 6px;border-radius:8px;font-weight:700;">Neural2 TTS</span></div>
       <div class="key-wrap">
-        <input type="password" id="googleKey" placeholder="AIzaSy..." oninput="saveKey('google')">
+        <input type="password" id="googleKey" placeholder="AIzaSy..."
+          onblur="saveKey('google')" onpaste="setTimeout(()=>saveKey('google'),100)">
         <button class="key-toggle" onclick="toggleVis('googleKey',this)">👁</button>
       </div>
       <div class="key-status s-empty" id="googleStatus">⬜ 키 없음</div>
@@ -324,7 +326,8 @@ input[type="range"]{flex:1;accent-color:var(--accent);}
     <div class="key-row">
       <div class="key-label">💜 Gemini API Key <span style="background:rgba(139,92,246,0.15);color:var(--gemini);font-size:9px;padding:2px 6px;border-radius:8px;font-weight:700;">Gemini 2.5 TTS</span></div>
       <div class="key-wrap">
-        <input type="password" id="geminiKey" placeholder="AIzaSy..." oninput="saveKey('gemini')">
+        <input type="password" id="geminiKey" placeholder="AIzaSy..."
+          onblur="saveKey('gemini')" onpaste="setTimeout(()=>saveKey('gemini'),100)">
         <button class="key-toggle" onclick="toggleVis('geminiKey',this)">👁</button>
       </div>
       <div class="key-status s-empty" id="geminiStatus">⬜ 키 없음</div>
@@ -333,7 +336,8 @@ input[type="range"]{flex:1;accent-color:var(--accent);}
       </div>
     </div>
 
-    <button class="btn btn-primary" style="margin-top:4px" onclick="switchTab(1)">저장 완료 → 뉴스 입력 ▶</button>
+    <button class="btn btn-success" style="margin-top:4px" onclick="saveAllKeys()">💾 API 키 전체 저장</button>
+    <button class="btn btn-primary" style="margin-top:8px" onclick="switchTab(1)">뉴스 입력으로 이동 ▶</button>
     <button class="btn btn-secondary" style="margin-top:8px" onclick="testAnthropicKey()">🔬 Anthropic 키 연결 테스트</button>
     <div id="testResult" style="margin-top:10px;font-size:12px;display:none;padding:10px;border-radius:8px"></div>
   </div>
@@ -751,24 +755,36 @@ function switchTab(i){
 // ════════ API KEY STORAGE ════════
 function saveKey(type){
   const val = document.getElementById(type+'Key').value.trim();
-  if(val) localStorage.setItem('snm_key_'+type, val);
-  else localStorage.removeItem('snm_key_'+type);
+  // 키가 충분히 길 때만 저장 (짧으면 지우지 않고 상태만 표시)
+  if(val.length >= 20){
+    localStorage.setItem('snm_key_'+type, val);
+  } else if(val.length === 0){
+    localStorage.removeItem('snm_key_'+type);
+  }
   updateKeyStatus(type, val);
 }
+
+function saveAllKeys(){
+  ['anthropic','google','gemini'].forEach(t => saveKey(t));
+  showToast('💾 API 키가 저장되었습니다');
+}
+
 function loadKeys(){
   ['anthropic','google','gemini'].forEach(t=>{
     const val = localStorage.getItem('snm_key_'+t)||'';
     if(val){
-      document.getElementById(t+'Key').value = val;
+      const el = document.getElementById(t+'Key');
+      if(el) el.value = val;
       updateKeyStatus(t, val);
     }
   });
 }
 function updateKeyStatus(type, val){
   const el = document.getElementById(type+'Status');
-  if(!val||val.length<10){ el.className='key-status s-empty'; el.textContent='⬜ 키 없음'; }
-  else if(val.length<20){ el.className='key-status s-err'; el.textContent='⚠️ 키가 너무 짧음'; }
-  else { el.className='key-status s-ok'; el.textContent='✅ 저장됨 (localStorage)'; }
+  if(!el) return;
+  if(!val||val.length===0){ el.className='key-status s-empty'; el.textContent='⬜ 키 없음'; }
+  else if(val.length<20){   el.className='key-status s-err';   el.textContent='⚠️ 입력 중...'; }
+  else {                    el.className='key-status s-ok';    el.textContent='✅ 저장됨 (localStorage)'; }
 }
 function toggleVis(id,btn){
   const el=document.getElementById(id);
@@ -801,13 +817,13 @@ function clearRawInput(){
   convertedScript = null;
 }
 
-// 글자수 업데이트
-document.addEventListener('DOMContentLoaded', ()=>{
+// 글자수 업데이트 — window.load 안으로 통합 (DOMContentLoaded 제거)
+function initRawInput(){
   const raw = document.getElementById('newsRawInput');
   if(raw) raw.addEventListener('input', ()=>{
     document.getElementById('rawCharCount').textContent = raw.value.length+'자';
   });
-});
+}
 
 async function convertToShorts(){
   const aKey = getKey('anthropic');
@@ -1825,6 +1841,7 @@ async function testAnthropicKey(){
 // ════════ INIT ════════
 window.addEventListener('load',()=>{
   loadKeys();
+  initRawInput();
   renderVoiceGrid();
   updatePreview();
   if('speechSynthesis' in window){
