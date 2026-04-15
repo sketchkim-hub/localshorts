@@ -1443,6 +1443,33 @@ async function makeMp4(){
     const hasBg    = subBgFlags[subStyleIdx];
     const hasStroke= subStrFlags[subStyleIdx];
 
+    // ── 비디오 스트림 ──
+    setMp4Progress(55, 'MediaRecorder 준비...');
+    const videoStream = canvas.captureStream(30);
+    let combinedStream = videoStream;
+
+    // ── 오디오 스트림 연결 (PC AudioContext resume 포함) ──
+    if(hasAudio && audioEl.src){
+      try {
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        // PC Chrome 정책: 사용자 인터랙션 후 resume 필요
+        if(audioCtx.state === 'suspended') await audioCtx.resume();
+
+        const resp    = await fetch(audioEl.src);
+        const arrBuf  = await resp.arrayBuffer();
+        const decoded = await audioCtx.decodeAudioData(arrBuf);
+        const src     = audioCtx.createBufferSource();
+        src.buffer    = decoded;
+        const dest    = audioCtx.createMediaStreamDestination();
+        src.connect(dest);
+        src.start(0);
+        dest.stream.getAudioTracks().forEach(t => combinedStream.addTrack(t));
+        setMp4Progress(60, '음성 연결 완료...');
+      } catch(ae){
+        console.warn('오디오 연결 실패, 무음으로 진행:', ae);
+      }
+    }
+
     const mimeType = getSupportedMime();
     const recorder = new MediaRecorder(combinedStream, {
       mimeType, videoBitsPerSecond: 5000000
