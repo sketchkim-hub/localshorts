@@ -1429,44 +1429,13 @@ async function makeMp4(){
     await drawNewsCard(ctx, W, H);
     setMp4Progress(25, '배경 렌더링 완료...');
 
-    // 자막 큐 준비
-    const ttsText = document.getElementById('ttsText').value ||
-      (document.getElementById('headline').value + '. ' + document.getElementById('bodyText').value);
-    const cues = splitToSubtitles(ttsText, durationSec);
-
-    // 자막 스타일
-    const subColors  = ['#ffffff','#ffff00','#00ffcc','#ffffff','#ffffff'];
-    const subBgFlags = [false, false, false, true, false];
-    const subStrFlags= [false, false, false, false, true];
-    const sc  = subColors[subStyleIdx]  || '#ffffff';
-    const hasBg     = subBgFlags[subStyleIdx];
-    const hasStroke = subStrFlags[subStyleIdx];
-
-    setMp4Progress(30, 'MediaRecorder 준비...');
-    const videoStream = canvas.captureStream(30);
-    let combinedStream = videoStream;
-
-    if(hasAudio && audioEl.src){
-      try {
-        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-        const resp = await fetch(audioEl.src);
-        const arrBuf = await resp.arrayBuffer();
-        const decoded = await audioCtx.decodeAudioData(arrBuf);
-        const src = audioCtx.createBufferSource();
-        src.buffer = decoded;
-        const dest = audioCtx.createMediaStreamDestination();
-        src.connect(dest); src.start(0);
-        dest.stream.getAudioTracks().forEach(t=>combinedStream.addTrack(t));
-        setMp4Progress(45, '음성 연결 완료...');
-      } catch(ae){ console.warn('오디오 연결 실패:', ae); }
-    }
-
     // Claude로 자막 타임스탬프 생성
     setMp4Progress(50, '🟠 Claude 자막 싱크 계산 중...');
     const ttsText = document.getElementById('ttsText').value ||
       (document.getElementById('headline').value + '. ' + document.getElementById('bodyText').value);
     const cues = await buildCuesWithClaude(ttsText, durationSec);
 
+    // 자막 스타일
     const subColors  = ['#ffffff','#ffff00','#00ffcc','#ffffff','#ffffff'];
     const subBgFlags = [false, false, false, true, false];
     const subStrFlags= [false, false, false, false, true];
