@@ -176,6 +176,24 @@ input[type="range"]{flex:1;accent-color:var(--accent);}
 .photo-thumb img{width:100%;height:100%;object-fit:cover;}
 .photo-remove{position:absolute;top:2px;right:2px;background:rgba(255,59,92,0.9);border:none;color:#fff;width:18px;height:18px;border-radius:50%;font-size:10px;cursor:pointer;display:flex;align-items:center;justify-content:center;}
 
+/* 타임라인 */
+.tl-block{position:absolute;top:0;height:100%;border-radius:4px;border:2px solid rgba(255,255,255,0.3);overflow:hidden;cursor:grab;transition:border-color 0.15s;box-sizing:border-box;}
+.tl-block:active{cursor:grabbing;}
+.tl-block.tl-active{border-color:#fff;box-shadow:0 0 0 2px var(--accent3);}
+.tl-block-inner{width:100%;height:100%;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:2px;pointer-events:none;}
+.tl-block-num{font-size:11px;font-weight:700;color:#fff;text-shadow:1px 1px 2px rgba(0,0,0,0.8);}
+.tl-block-dur{font-size:9px;color:rgba(255,255,255,0.8);}
+.tl-block-thumb{position:absolute;inset:0;object-fit:cover;opacity:0.4;}
+.tl-handle{position:absolute;top:0;bottom:0;width:10px;background:rgba(255,255,255,0.5);cursor:col-resize;z-index:10;border-radius:2px;}
+.tl-handle-r{right:0;}
+.tl-handle-l{left:0;}
+.tl-ruler-tick{position:absolute;top:0;font-size:9px;color:var(--text2);transform:translateX(-50%);}
+.tl-slider-row{display:flex;align-items:center;gap:8px;padding:8px 10px;background:var(--card);border-radius:8px;border:1px solid var(--border);}
+.tl-slider-thumb{width:36px;height:36px;border-radius:6px;object-fit:cover;flex-shrink:0;}
+.tl-slider-info{flex:1;min-width:0;}
+.tl-slider-name{font-size:11px;font-weight:700;margin-bottom:4px;}
+.tl-slider-time{font-size:10px;color:var(--accent3);}
+
 /* ── BUTTONS ── */
 .btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;padding:14px;border-radius:12px;border:none;font-family:'Noto Sans KR',sans-serif;font-size:14px;font-weight:700;cursor:pointer;transition:all 0.2s;}
 .btn-primary{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;}
@@ -486,12 +504,42 @@ input[type="range"]{flex:1;accent-color:var(--accent);}
 
   <div class="section">
     <div class="section-label">사진 업로드</div>
-    <label class="photo-upload" for="photoInput">
-      <input type="file" id="photoInput" accept="image/*" multiple onchange="handlePhotos(event)">
-      <div class="photo-upload-icon">📷</div>
-      <div class="photo-upload-text">탭하여 사진 선택 (최대 5장)</div>
-    </label>
+    <div class="photo-upload" for="photoInput">
+      <input type="file" id="photoInput" accept="image/*" multiple onchange="handlePhotos(event)" style="display:none">
+      <label for="photoInput" style="cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:6px;width:100%">
+        <div class="photo-upload-icon">📷</div>
+        <div class="photo-upload-text">탭하여 사진 선택 (최대 5장)</div>
+      </label>
+    </div>
     <div class="photo-grid" id="photoGrid"></div>
+
+    <!-- 사진 타임라인 에디터 -->
+    <div id="photoTimeline" style="display:none;margin-top:14px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <div class="section-label" style="margin-bottom:0">🎬 사진 구간 편집</div>
+        <div style="display:flex;gap:6px">
+          <button onclick="autoDistribute()" style="font-size:11px;padding:4px 10px;border-radius:16px;background:rgba(0,212,170,0.1);border:1px solid rgba(0,212,170,0.3);color:var(--accent3);cursor:pointer;font-weight:700">⚡ 균등 배분</button>
+          <button onclick="syncFromAudio()" style="font-size:11px;padding:4px 10px;border-radius:16px;background:rgba(217,119,6,0.1);border:1px solid rgba(217,119,6,0.3);color:var(--claude);cursor:pointer;font-weight:700">🟠 AI 배분</button>
+        </div>
+      </div>
+
+      <!-- 총 길이 표시 바 -->
+      <div style="font-size:11px;color:var(--text2);margin-bottom:6px">
+        총 영상 길이: <span id="tlTotalSec" style="color:var(--accent3);font-weight:700">0초</span>
+        <span style="margin-left:8px;font-size:10px">(음성 탭에서 TTS 생성 후 AI 배분 가능)</span>
+      </div>
+
+      <!-- 타임라인 트랙 -->
+      <div id="tlTrack" style="position:relative;background:var(--surface);border-radius:8px;border:1px solid var(--border);overflow:hidden;user-select:none">
+        <!-- JS로 렌더링 -->
+      </div>
+
+      <!-- 시간 눈금 -->
+      <div id="tlRuler" style="position:relative;height:20px;margin-top:2px"></div>
+
+      <!-- 사진별 세부 조절 슬라이더 -->
+      <div id="tlSliders" style="margin-top:12px;display:flex;flex-direction:column;gap:8px"></div>
+    </div>
   </div>
 
   <div class="section">
@@ -761,7 +809,8 @@ const S = {
   template:'breaking', photos:[], selPhoto:0, layout:'full',
   channel:'e-빠른뉴스', hSize:20, bSize:11,
   engine:'google', googleVoice:'ko-KR-Neural2-A', geminiVoice:'Kore', browserVoice:'default',
-  allNews:[], filteredNews:[], selectedNews:null
+  allNews:[], filteredNews:[], selectedNews:null,
+  photoSegments: null   // [{photoIdx, start, end}]
 };
 let ttsPlaying=false, audioBlob=null, currentAudio=null, progTimer=null;
 
@@ -1263,7 +1312,12 @@ function updateCC(id,max,cid){
 function handlePhotos(e){
   Array.from(e.target.files).slice(0,5-S.photos.length).forEach(f=>{
     const r=new FileReader();
-    r.onload=ev=>{S.photos.push(ev.target.result);renderPhotoGrid();updatePreview();};
+    r.onload=ev=>{
+      S.photos.push(ev.target.result);
+      S.photoSegments=null;
+      renderPhotoGrid(); updatePreview();
+      setTimeout(initTimeline, 100);
+    };
     r.readAsDataURL(f);
   });
 }
@@ -1276,7 +1330,12 @@ function renderPhotoGrid(){
     </div>`).join('');
 }
 function selPhoto(i){S.selPhoto=i;renderPhotoGrid();updatePreview();}
-function rmPhoto(i){S.photos.splice(i,1);if(S.selPhoto>=S.photos.length)S.selPhoto=Math.max(0,S.photos.length-1);renderPhotoGrid();updatePreview();}
+function rmPhoto(i){
+  S.photos.splice(i,1);
+  S.photoSegments=null;
+  if(S.selPhoto>=S.photos.length)S.selPhoto=Math.max(0,S.photos.length-1);
+  renderPhotoGrid(); updatePreview(); setTimeout(initTimeline,100);
+}
 
 // ════════ PREVIEW ════════
 function updatePreview(){
@@ -1333,7 +1392,272 @@ async function exportAct(type){
 }
 function finalPublish(){showToast('🚀 유튜브 스튜디오에서 업로드하세요!');}
 
-// ════════ BGM (배경음악) ════════
+// ════════ 사진 타임라인 에디터 ════════
+// S.photoSegments = [{photoIdx, start, end}] — 초 단위
+let tlDragging = null; // {segIdx, type:'move'|'resizeL'|'resizeR', startX, origStart, origEnd}
+const COLORS = ['#e74c3c','#3498db','#2ecc71','#f39c12','#9b59b6'];
+
+function initTimeline(){
+  if(S.photos.length < 2){
+    document.getElementById('photoTimeline').style.display = 'none';
+    return;
+  }
+  document.getElementById('photoTimeline').style.display = 'block';
+
+  // 오디오 길이 가져오기
+  const audioEl = document.getElementById('generatedAudio');
+  const totalSec = (audioEl && isFinite(audioEl.duration) && audioEl.duration > 0)
+    ? Math.ceil(audioEl.duration) : 30;
+
+  // 세그먼트 초기화 (균등)
+  if(!S.photoSegments || S.photoSegments.length !== S.photos.length){
+    autoDistributeWith(totalSec);
+  }
+  renderTimeline();
+}
+
+function autoDistribute(){
+  const audioEl = document.getElementById('generatedAudio');
+  const total = (audioEl && isFinite(audioEl.duration) && audioEl.duration > 0)
+    ? Math.ceil(audioEl.duration) : 30;
+  autoDistributeWith(total);
+  renderTimeline();
+  showToast('⚡ 균등 배분 완료');
+}
+
+function autoDistributeWith(totalSec){
+  const n = S.photos.length;
+  const segDur = totalSec / n;
+  S.photoSegments = S.photos.map((_, i) => ({
+    photoIdx: i,
+    start: Math.round(i * segDur * 10) / 10,
+    end:   Math.round((i + 1) * segDur * 10) / 10
+  }));
+  S.photoSegments[n-1].end = totalSec;
+  document.getElementById('tlTotalSec').textContent = totalSec + '초';
+}
+
+async function syncFromAudio(){
+  const aKey = getKey('anthropic');
+  if(!aKey){ showToast('⚠️ Anthropic 키 필요'); return; }
+
+  const audioEl = document.getElementById('generatedAudio');
+  const totalSec = (audioEl && isFinite(audioEl.duration) && audioEl.duration > 0)
+    ? Math.ceil(audioEl.duration) : 30;
+  const ttsText = document.getElementById('ttsText').value ||
+    (document.getElementById('headline').value + '. ' + document.getElementById('bodyText').value);
+  const n = S.photos.length;
+
+  if(!ttsText.trim()){ showToast('📝 음성 탭에서 TTS 텍스트를 먼저 입력하세요'); return; }
+
+  showToast('🟠 Claude AI 배분 계산 중...');
+
+  const prompt = `TTS 대본을 ${totalSec}초 영상에서 사진 ${n}장에 배분하려 합니다.
+대본 내용을 분석해서 각 사진이 표시될 시간 구간을 정해주세요.
+- 중요한 내용·장면이 바뀌는 부분에서 사진 전환
+- 각 사진 최소 2초 이상
+
+대본: ${ttsText.slice(0,500)}
+총 길이: ${totalSec}초, 사진 수: ${n}장
+
+JSON 배열만 출력:
+[{"photoIdx":0,"start":0,"end":8.5},{"photoIdx":1,"start":8.5,"end":18},...]`;
+
+  try {
+    const res = await fetch('https://api.anthropic.com/v1/messages',{
+      method:'POST',
+      headers:{'Content-Type':'application/json','x-api-key':aKey,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
+      body:JSON.stringify({model:'claude-haiku-4-5-20251001',max_tokens:500,messages:[{role:'user',content:prompt}]})
+    });
+    const data = await res.json();
+    if(!res.ok) throw new Error(data.error?.message);
+    const raw = data.content?.[0]?.text?.trim()||'[]';
+    const clean = raw.replace(/^```[\w\s]*\n?/m,'').replace(/\n?```\s*$/m,'').trim();
+    const segs = JSON.parse(clean);
+    if(Array.isArray(segs) && segs.length === n){
+      S.photoSegments = segs;
+      document.getElementById('tlTotalSec').textContent = totalSec + '초';
+      renderTimeline();
+      showToast('✅ AI 배분 완료!');
+    } else { throw new Error('결과 형식 오류'); }
+  } catch(e){
+    console.error(e);
+    showToast('⚠️ AI 배분 실패, 균등 배분 적용');
+    autoDistributeWith(totalSec);
+    renderTimeline();
+  }
+}
+
+function renderTimeline(){
+  const segs = S.photoSegments;
+  if(!segs || segs.length === 0) return;
+
+  const totalSec = segs[segs.length-1].end;
+  const track = document.getElementById('tlTrack');
+  const ruler = document.getElementById('tlRuler');
+  const sliders = document.getElementById('tlSliders');
+  const trackW = track.clientWidth || 300;
+  const trackH = 64;
+  track.style.height = trackH + 'px';
+
+  // 블록 렌더
+  track.innerHTML = segs.map((seg, i) => {
+    const left = (seg.start / totalSec) * 100;
+    const width = ((seg.end - seg.start) / totalSec) * 100;
+    const col = COLORS[i % COLORS.length];
+    const dur = (seg.end - seg.start).toFixed(1);
+    const thumb = S.photos[seg.photoIdx]
+      ? `<img class="tl-block-thumb" src="${S.photos[seg.photoIdx]}">`:'';
+    return `
+      <div class="tl-block" id="tlb-${i}" data-idx="${i}"
+        style="left:${left}%;width:${width}%;background:${col}88;top:0;height:100%"
+        onmousedown="tlDragStart(event,${i},'move')"
+        ontouchstart="tlTouchStart(event,${i},'move')">
+        ${thumb}
+        <div class="tl-block-inner">
+          <div class="tl-block-num">📷${i+1}</div>
+          <div class="tl-block-dur">${dur}s</div>
+        </div>
+        <div class="tl-handle tl-handle-l"
+          onmousedown="event.stopPropagation();tlDragStart(event,${i},'resizeL')"
+          ontouchstart="event.stopPropagation();tlTouchStart(event,${i},'resizeL')"></div>
+        <div class="tl-handle tl-handle-r"
+          onmousedown="event.stopPropagation();tlDragStart(event,${i},'resizeR')"
+          ontouchstart="event.stopPropagation();tlTouchStart(event,${i},'resizeR')"></div>
+      </div>`;
+  }).join('');
+
+  // 눈금
+  const tickCount = Math.min(Math.ceil(totalSec), 10);
+  ruler.innerHTML = '';
+  for(let t=0; t<=tickCount; t++){
+    const sec = Math.round((t/tickCount)*totalSec);
+    const pct = (t/tickCount)*100;
+    ruler.innerHTML += `<div class="tl-ruler-tick" style="left:${pct}%">${sec}s</div>`;
+  }
+
+  // 슬라이더 목록
+  sliders.innerHTML = segs.map((seg, i) => {
+    const dur = (seg.end - seg.start).toFixed(1);
+    const col = COLORS[i % COLORS.length];
+    const thumb = S.photos[seg.photoIdx]||'';
+    return `
+      <div class="tl-slider-row">
+        <img class="tl-slider-thumb" src="${thumb}" style="border:2px solid ${col}">
+        <div class="tl-slider-info">
+          <div class="tl-slider-name" style="color:${col}">사진 ${i+1}</div>
+          <input type="range" min="0.5" max="${totalSec}" step="0.5"
+            value="${seg.start}" style="width:100%;accent-color:${col}"
+            oninput="tlUpdateStart(${i},parseFloat(this.value));this.nextElementSibling.textContent='시작 '+parseFloat(this.value).toFixed(1)+'s'">
+          <div class="tl-slider-time">시작 ${seg.start.toFixed(1)}s · 길이 ${dur}s</div>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+// 시작점 슬라이더로 조절
+function tlUpdateStart(idx, newStart){
+  const segs = S.photoSegments;
+  const minDur = 1.0;
+  const totalSec = segs[segs.length-1].end;
+
+  // 이전 세그먼트 end와 다음 세그먼트 start 사이 범위 제한
+  const minStart = idx > 0 ? segs[idx-1].start + minDur : 0;
+  const maxStart = segs[idx].end - minDur;
+  newStart = Math.max(minStart, Math.min(maxStart, newStart));
+
+  segs[idx].start = Math.round(newStart * 10) / 10;
+  if(idx > 0) segs[idx-1].end = segs[idx].start;
+
+  renderTimeline();
+}
+
+// 마우스 드래그
+function tlDragStart(e, idx, type){
+  e.preventDefault();
+  const track = document.getElementById('tlTrack');
+  const rect  = track.getBoundingClientRect();
+  const totalSec = S.photoSegments[S.photoSegments.length-1].end;
+
+  tlDragging = {idx, type,
+    startX: e.clientX,
+    origStart: S.photoSegments[idx].start,
+    origEnd:   S.photoSegments[idx].end,
+    rect, totalSec
+  };
+
+  document.addEventListener('mousemove', tlDragMove);
+  document.addEventListener('mouseup',   tlDragEnd);
+}
+
+function tlDragMove(e){
+  if(!tlDragging) return;
+  const {idx, type, startX, origStart, origEnd, rect, totalSec} = tlDragging;
+  const dx = e.clientX - startX;
+  const dSec = (dx / rect.width) * totalSec;
+  const segs = S.photoSegments;
+  const minDur = 1.0;
+
+  if(type === 'move'){
+    const dur = origEnd - origStart;
+    let ns = Math.max(0, Math.min(totalSec - dur, origStart + dSec));
+    ns = Math.round(ns * 10) / 10;
+    segs[idx].start = ns;
+    segs[idx].end   = Math.round((ns + dur) * 10) / 10;
+    // 인접 세그먼트 밀기
+    if(idx > 0) segs[idx-1].end = segs[idx].start;
+    if(idx < segs.length-1) segs[idx+1].start = segs[idx].end;
+  } else if(type === 'resizeR'){
+    let ne = Math.max(origStart + minDur, Math.min(totalSec, origEnd + dSec));
+    ne = Math.round(ne * 10) / 10;
+    segs[idx].end = ne;
+    if(idx < segs.length-1) segs[idx+1].start = ne;
+  } else if(type === 'resizeL'){
+    let ns = Math.max(0, Math.min(origEnd - minDur, origStart + dSec));
+    ns = Math.round(ns * 10) / 10;
+    segs[idx].start = ns;
+    if(idx > 0) segs[idx-1].end = ns;
+  }
+  renderTimeline();
+}
+
+function tlDragEnd(){
+  tlDragging = null;
+  document.removeEventListener('mousemove', tlDragMove);
+  document.removeEventListener('mouseup',   tlDragEnd);
+}
+
+// 터치 지원
+function tlTouchStart(e, idx, type){
+  e.preventDefault();
+  const touch = e.touches[0];
+  const track = document.getElementById('tlTrack');
+  const rect  = track.getBoundingClientRect();
+  const totalSec = S.photoSegments[S.photoSegments.length-1].end;
+
+  tlDragging = {idx, type,
+    startX: touch.clientX,
+    origStart: S.photoSegments[idx].start,
+    origEnd:   S.photoSegments[idx].end,
+    rect, totalSec
+  };
+
+  document.addEventListener('touchmove',  tlTouchMove, {passive:false});
+  document.addEventListener('touchend',   tlTouchEnd);
+}
+
+function tlTouchMove(e){
+  e.preventDefault();
+  if(!tlDragging) return;
+  const touch = e.touches[0];
+  tlDragMove({clientX: touch.clientX});
+}
+
+function tlTouchEnd(){
+  tlDragging = null;
+  document.removeEventListener('touchmove', tlTouchMove);
+  document.removeEventListener('touchend',  tlTouchEnd);
+}
 let bgmBlob = null;
 let bgmObjectUrl = null;
 
@@ -1560,40 +1884,74 @@ async function makeMp4(){
 
     // ── 비디오 스트림 ──
     setMp4Progress(55, '스트림 준비...');
+
+    // captureStream 지원 여부 확인
+    if(typeof canvas.captureStream !== 'function'){
+      throw new Error('이 브라우저는 MP4 생성을 지원하지 않습니다.\nPC Chrome 또는 Android Chrome을 사용해 주세요.');
+    }
+
     const videoStream = canvas.captureStream(24);
     let combinedStream = videoStream;
 
-    // ── 오디오 믹싱 (TTS + BGM) ──
+    // ── 오디오 연결 ──
     let audioForRecord = null;
     const hasBgm = !!bgmBlob;
 
     if(hasAudio || hasBgm){
       try {
-        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-        if(audioCtx.state === 'suspended') await audioCtx.resume();
-
-        const dest = audioCtx.createMediaStreamDestination();
-        const ttsVol = parseInt(document.getElementById('ttsVolume')?.value || 100) / 100;
-        const bgmVol = parseInt(document.getElementById('bgmVolume')?.value || 30) / 100;
-        const bgmLoop = document.getElementById('bgmLoop')?.checked ?? true;
-        const bgmFade = document.getElementById('bgmFadeOut')?.checked ?? true;
-
-        // ① TTS 음성 연결
-        if(hasAudio && audioEl.src){
-          try {
+        if(!hasBgm){
+          // ── BGM 없음: captureStream 방식 (iOS 포함 가장 안정적) ──
+          if(hasAudio && audioEl.src){
             audioForRecord = new Audio(audioEl.src);
-            audioForRecord.crossOrigin = 'anonymous';
-            const ttsSource = audioCtx.createMediaElementSource(audioForRecord);
-            const ttsGain   = audioCtx.createGain();
-            ttsGain.gain.value = ttsVol;
-            ttsSource.connect(ttsGain);
-            ttsGain.connect(dest);
-            ttsGain.connect(audioCtx.destination);
-          } catch(e){ console.warn('TTS 연결 실패:', e); audioForRecord = null; }
-        }
+            audioForRecord.muted = false;
+            audioForRecord.volume = 1;
 
-        // ② BGM 연결
-        if(hasBgm && bgmObjectUrl){
+            // captureStream 지원 시 오디오 트랙 추가
+            const capFn = audioForRecord.captureStream || audioForRecord.mozCaptureStream;
+            if(typeof capFn === 'function'){
+              const aStream = capFn.call(audioForRecord);
+              // 트랙이 생길 때까지 잠깐 대기
+              await new Promise(r => setTimeout(r, 100));
+              aStream.getAudioTracks().forEach(t => combinedStream.addTrack(t));
+              setMp4Progress(60, '음성 스트림 연결 완료...');
+            } else {
+              // captureStream 미지원 → AudioContext 시도
+              const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+              if(audioCtx.state === 'suspended') await audioCtx.resume();
+              const dest = audioCtx.createMediaStreamDestination();
+              const src  = audioCtx.createMediaElementSource(audioForRecord);
+              src.connect(dest);
+              src.connect(audioCtx.destination);
+              dest.stream.getAudioTracks().forEach(t => combinedStream.addTrack(t));
+              setMp4Progress(60, '음성(AudioContext) 연결 완료...');
+            }
+          }
+        } else {
+          // ── BGM 있음: AudioContext 믹싱 (PC/Android) ──
+          const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+          if(audioCtx.state === 'suspended') await audioCtx.resume();
+
+          const dest   = audioCtx.createMediaStreamDestination();
+          const ttsVol = parseInt(document.getElementById('ttsVolume')?.value||100)/100;
+          const bgmVol = parseInt(document.getElementById('bgmVolume')?.value||30)/100;
+          const bgmLoop= document.getElementById('bgmLoop')?.checked ?? true;
+          const bgmFade= document.getElementById('bgmFadeOut')?.checked ?? true;
+
+          // TTS
+          if(hasAudio && audioEl.src){
+            try {
+              audioForRecord = new Audio(audioEl.src);
+              audioForRecord.crossOrigin = 'anonymous';
+              const ttsSource = audioCtx.createMediaElementSource(audioForRecord);
+              const ttsGain   = audioCtx.createGain();
+              ttsGain.gain.value = ttsVol;
+              ttsSource.connect(ttsGain);
+              ttsGain.connect(dest);
+              ttsGain.connect(audioCtx.destination);
+            } catch(e){ console.warn('TTS 연결 실패:', e); audioForRecord = null; }
+          }
+
+          // BGM
           try {
             const bgmEl = new Audio(bgmObjectUrl);
             bgmEl.loop = bgmLoop;
@@ -1601,33 +1959,21 @@ async function makeMp4(){
             const bgmSource = audioCtx.createMediaElementSource(bgmEl);
             const bgmGain   = audioCtx.createGain();
             bgmGain.gain.value = bgmVol;
-
-            // 페이드아웃 — 마지막 3초
             if(bgmFade && durationSec > 4){
-              const fadeStart = durationSec - 3;
-              bgmGain.gain.setValueAtTime(bgmVol, audioCtx.currentTime + fadeStart);
+              bgmGain.gain.setValueAtTime(bgmVol, audioCtx.currentTime + durationSec - 3);
               bgmGain.gain.linearRampToValueAtTime(0, audioCtx.currentTime + durationSec);
             }
-
             bgmSource.connect(bgmGain);
             bgmGain.connect(dest);
             bgmGain.connect(audioCtx.destination);
-
-            // BGM 재생 시작 (녹화 시작 직전에)
-            setTimeout(() => {
-              bgmEl.currentTime = 0;
-              bgmEl.play().catch(e => console.warn('BGM 재생 실패:', e));
-            }, 100);
-
+            setTimeout(()=>{ bgmEl.currentTime=0; bgmEl.play().catch(()=>{}); }, 100);
           } catch(e){ console.warn('BGM 연결 실패:', e); }
+
+          dest.stream.getAudioTracks().forEach(t => combinedStream.addTrack(t));
+          setMp4Progress(60, '🎵 TTS + BGM 믹싱 완료...');
         }
-
-        // 믹싱된 스트림 추가
-        dest.stream.getAudioTracks().forEach(t => combinedStream.addTrack(t));
-        setMp4Progress(60, hasBgm ? '🎵 TTS + BGM 믹싱 완료...' : '음성 연결 완료...');
-
       } catch(ae){
-        console.warn('오디오 믹싱 실패, 무음:', ae);
+        console.warn('오디오 연결 실패, 무음:', ae);
         setMp4Progress(60, '⚠️ 무음으로 진행...');
       }
     }
@@ -1639,9 +1985,20 @@ async function makeMp4(){
     const chunks = [];
     recorder.ondataavailable = e => { if(e.data.size>0) chunks.push(e.data); };
 
-    // 사진 슬라이드쇼 준비 — 사진 수에 따라 균등 전환
+    // 사진 슬라이드쇼 준비 — 타임라인 세그먼트 또는 균등 배분
     const photoCount = S.photos.length;
-    const slideInterval = photoCount > 1 ? durationSec / photoCount : durationSec;
+    let segs = S.photoSegments;
+    if(!segs || segs.length !== photoCount){
+      // 세그먼트 없으면 균등 배분
+      const segDur = durationSec / Math.max(photoCount, 1);
+      segs = S.photos.map((_, i) => ({
+        photoIdx: i,
+        start: i * segDur,
+        end: (i + 1) * segDur
+      }));
+      if(segs.length > 0) segs[segs.length-1].end = durationSec;
+    }
+    const slideInterval = durationSec / Math.max(photoCount, 1); // fallback용
 
     // 모든 사진 미리 로드
     const preloadedImgs = [];
@@ -1689,11 +2046,13 @@ async function makeMp4(){
           return;
         }
 
-        // 현재 표시할 사진 인덱스
-        const photoIdx = Math.min(
-          Math.floor(elapsed / slideInterval),
-          photoCount > 0 ? photoCount - 1 : 0
-        );
+        // 현재 표시할 사진 인덱스 — photoSegments 기반
+        let photoIdx = 0;
+        if(segs && segs.length > 0){
+          const activeSeg = segs.find(s => elapsed >= s.start && elapsed < s.end);
+          photoIdx = activeSeg ? activeSeg.photoIdx
+            : (elapsed >= segs[segs.length-1].end ? segs[segs.length-1].photoIdx : 0);
+        }
 
         // 사진이 바뀔 때만 배경 복원 (성능 최적화)
         if(photoIdx !== lastPhotoIdx || lastPhotoIdx === -1){
@@ -1712,7 +2071,7 @@ async function makeMp4(){
         // 진행률
         const pct = 70 + Math.round((elapsed / durationSec) * 25);
         setMp4Progress(Math.min(pct, 94),
-          `녹화 중... ${elapsed.toFixed(1)}/${durationSec}초 [사진${Math.min(photoIdx+1, photoCount)}/${Math.max(photoCount,1)}]`);
+          `녹화 중... ${elapsed.toFixed(1)}/${durationSec}초 [📷${photoIdx+1}/${Math.max(photoCount,1)}]`);
 
       }, FRAME_MS);
     });
@@ -1726,7 +2085,7 @@ async function makeMp4(){
     const url = URL.createObjectURL(mp4Blob);
     document.getElementById('mp4Preview').src = url;
     result.style.display = 'block';
-    showToast(`✅ ${ext.toUpperCase()} 완성!`);
+    showToast(`✅ ${ext.toUpperCase()} 완성! (${Math.round(mp4Blob.size/1024)}KB)`);
 
   } catch(e){
     console.error('MP4 오류:', e);
