@@ -1710,69 +1710,60 @@ let subtitleCues = [];
 let subStyleIdx = 0;
 const SUB_STYLES = ['흰색','노란색','민트 네온','검정 박스','레드 아웃라인'];
 
-// Claude API로 정밀 타임스탬프 생성
+// 자막 큐 생성 — 실제 한국어 읽기 속도 기반 정밀 계산
+// Claude API 추정 대신 글자수 × 읽기속도로 직접 계산 (싱크 정확)
 async function buildCuesWithClaude(text, totalDur){
-  const aKey = getKey('anthropic');
-  if(!aKey || !text || !totalDur) return splitToSubtitles(text, totalDur);
-
-  const prompt = `다음 한국어 TTS 대본을 ${totalDur}초 음성으로 읽는다고 가정하고,
-6어절 이하 단위로 나눠서 각 구간의 시작/종료 시간을 계산해 주세요.
-평균 한국어 읽기 속도(분당 약 300자)를 기준으로 글자 수에 비례해 시간을 배분하세요.
-
-대본:
-${text}
-
-JSON 배열만 출력 (설명 없이):
-[{"start":0.0,"end":2.3,"text":"첫번째 자막"},{"start":2.3,"end":4.8,"text":"두번째 자막"},...]`;
-
-  try {
-    const res = await fetch('https://api.anthropic.com/v1/messages',{
-      method:'POST',
-      headers:{
-        'Content-Type':'application/json',
-        'x-api-key': aKey,
-        'anthropic-version':'2023-06-01',
-        'anthropic-dangerous-direct-browser-access':'true'
-      },
-      body: JSON.stringify({
-        model:'claude-haiku-4-5-20251001',
-        max_tokens:2000,
-        messages:[{role:'user', content:prompt}]
-      })
-    });
-    const data = await res.json();
-    if(!res.ok) throw new Error('Claude 타임스탬프 오류');
-    const raw = data.content?.[0]?.text?.trim()||'[]';
-    const clean = raw.replace(/^```[\w\s]*\n?/m,'').replace(/\n?```\s*$/m,'').trim();
-    const cues = JSON.parse(clean);
-    if(Array.isArray(cues) && cues.length > 0){
-      console.log(`✅ Claude 타임스탬프 ${cues.length}개 생성`);
-      return cues;
-    }
-  } catch(e){ console.warn('Claude 타임스탬프 실패, 기본 방식 사용:', e); }
-
+  if(!text || !totalDur) return [];
+  // Claude API 없이도 정밀 계산
   return splitToSubtitles(text, totalDur);
 }
 
 function splitToSubtitles(text, totalDur){
-  if(!text||!totalDur) return [];
-  const sentences = text.replace(/\n+/g,' ')
-    .split(/(?<=[.!?。])\s+/)
-    .map(s=>s.trim()).filter(s=>s.length>0);
+  if(!text || !totalDur) return [];
+
+  // 1) 텍스트 정제
+  const cleaned = text
+    .replace(/\n+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  // 2) 문장 단위로 먼저 분리
+  const sentences = cleaned
+    .split(/(?<=[.!?。다\.습니다\.])\s+/)
+    .map(s => s.trim())
+    .filter(s => s.length > 0);
+
+  // 3) 각 문장을 4어절 단위 청크로 분할
   const chunks = [];
   for(const sent of sentences){
     const words = sent.split(/\s+/);
-    for(let i=0;i<words.length;i+=5){
-      const chunk = words.slice(i,i+5).join(' ');
-      if(chunk.trim()) chunks.push(chunk.trim());
+    for(let i = 0; i < words.length; i += 4){
+      const chunk = words.slice(i, i + 4).join(' ').trim();
+      if(chunk) chunks.push(chunk);
     }
   }
-  if(!chunks.length) return [{start:0, end:totalDur, text:text.slice(0,30)}];
-  const totalChars = chunks.reduce((s,c)=>s+c.length,0);
+  if(!chunks.length){
+    // 분리 실패 시 4어절씩 강제 분할
+    const words = cleaned.split(/\s+/);
+    for(let i = 0; i < words.length; i += 4){
+      const chunk = words.slice(i, i + 4).join(' ').trim();
+      if(chunk) chunks.push(chunk);
+    }
+  }
+  if(!chunks.length) return [{start:0, end:totalDur, text:cleaned.slice(0, 20)}];
+
+  // 4) 한국어 실제 읽기 속도로 타임스탬프 계산
+  // 한국어 평균 읽기 속도: 분당 약 330자 = 초당 5.5자
+  // 단, 총 글자 수 기준으로 totalDur에 맞게 스케일링
+  const totalChars = chunks.reduce((s, c) => s + c.length, 0);
+  // 글자당 시간 = 총 시간 / 총 글자 수
+  const secPerChar = totalDur / totalChars;
+
   let cursor = 0;
-  return chunks.map(chunk=>{
-    const dur = totalDur * (chunk.length/totalChars);
-    const cue = {start:cursor, end:cursor+dur, text:chunk};
+  return chunks.map(chunk => {
+    // 최소 표시 시간: 0.8초, 최대: 5초
+    const dur = Math.min(5.0, Math.max(0.8, chunk.length * secPerChar));
+    const cue = { start: parseFloat(cursor.toFixed(2)), end: parseFloat((cursor + dur).toFixed(2)), text: chunk };
     cursor += dur;
     return cue;
   });
@@ -1806,16 +1797,25 @@ function onAudioTime(){
 
 let lastSubText = '';
 function setSubtitle(text){
-  const el = document.getElementById('subtitleText');
+  const el   = document.getElementById('subtitleText');
   const wrap = document.getElementById('subtitlePreview');
   if(!el) return;
   if(text === lastSubText) return;
   lastSubText = text;
-  el.textContent = text || '';
+  // 줄바꿈 처리 — 긴 텍스트는 두 줄로 표시
   if(text){
+    const words = text.split(' ');
+    const mid   = Math.ceil(words.length / 2);
+    const line1 = words.slice(0, mid).join(' ');
+    const line2 = words.slice(mid).join(' ');
+    el.innerHTML = line2
+      ? `${line1}<br><span style="opacity:0.9">${line2}</span>`
+      : line1;
     wrap.classList.remove('sub-active');
-    void wrap.offsetWidth; // reflow
+    void wrap.offsetWidth;
     wrap.classList.add('sub-active');
+  } else {
+    el.textContent = '';
   }
 }
 
@@ -2115,47 +2115,58 @@ function getSupportedMime(){
 // 캔버스에 자막 그리기 — 상단 위치
 function drawSubtitle(ctx, text, W, H, color, hasBg, hasStroke){
   if(!text) return;
-  const fontSize = 72;
+  const fontSize = 68;
   ctx.save();
   ctx.font = `bold ${fontSize}px 'Noto Sans KR', sans-serif`;
   ctx.textAlign = 'center';
 
-  // 5어절 이하로 두 줄 분할
+  // 최대 너비 기준으로 2~3줄 자동 분할
+  const maxLineW = W - 140;
   const words = text.split(' ');
   const lines = [];
   let line = '';
   for(const w of words){
     const test = line ? line+' '+w : w;
-    if(ctx.measureText(test).width > W - 160 && line){
-      lines.push(line); line = w;
-    } else { line = test; }
+    if(ctx.measureText(test).width > maxLineW && line){
+      lines.push(line);
+      line = w;
+    } else {
+      line = test;
+    }
   }
   if(line) lines.push(line);
 
-  const lineH = fontSize * 1.35;
-  const totalH = lines.length * lineH;
+  // 최대 3줄로 제한
+  const visibleLines = lines.slice(0, 3);
 
-  // ★ 상단 배치: 채널명(100px) 아래 여백(60px) + 자막
-  const baseY = 200;
+  const lineH  = fontSize * 1.4;
+  const totalH = visibleLines.length * lineH;
+  const pad    = 24;
+
+  // 상단 배치 (채널명 아래)
+  const baseY  = 180;
 
   if(hasBg){
-    const maxW = Math.max(...lines.map(l=>ctx.measureText(l).width));
-    const pad = 28;
-    ctx.fillStyle = 'rgba(0,0,0,0.78)';
-    roundRect(ctx, W/2 - maxW/2 - pad, baseY - fontSize,
-              maxW + pad*2, totalH + pad, 18);
+    const maxW = Math.max(...visibleLines.map(l => ctx.measureText(l).width));
+    ctx.fillStyle = 'rgba(0,0,0,0.80)';
+    roundRect(ctx,
+      W/2 - maxW/2 - pad,
+      baseY - fontSize + 4,
+      maxW + pad*2,
+      totalH + pad,
+      18);
     ctx.fill();
   }
 
-  lines.forEach((l, i) => {
+  visibleLines.forEach((l, i) => {
     const y = baseY + i * lineH;
     if(hasStroke){
       ctx.strokeStyle = '#ff3b5c';
       ctx.lineWidth = 7;
       ctx.strokeText(l, W/2, y);
     }
-    ctx.shadowColor = 'rgba(0,0,0,0.95)';
-    ctx.shadowBlur = 14;
+    ctx.shadowColor   = 'rgba(0,0,0,0.95)';
+    ctx.shadowBlur    = 16;
     ctx.shadowOffsetX = 2;
     ctx.shadowOffsetY = 2;
     ctx.fillStyle = color;
