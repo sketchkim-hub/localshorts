@@ -803,7 +803,7 @@ input[type="range"]{flex:1;accent-color:var(--accent);}
 
       <div id="mp4Result" style="display:none;margin-top:14px">
         <video id="mp4Preview" controls style="width:100%;border-radius:10px;max-height:300px;background:#000"></video>
-        <button class="dl-btn" id="mp4DlBtn" style="margin-top:8px" onclick="downloadMp4()">⬇️ MP4 다운로드 (갤러리 저장)</button>
+        <button class="dl-btn" id="mp4DlBtn" style="margin-top:8px" onclick="downloadMp4()">⬇️ 영상 다운로드</button>
       </div>
     </div>
   </div>
@@ -2143,17 +2143,16 @@ async function makeMp4(){
       }, FRAME_MS);
     });
 
-    setMp4Progress(97, 'MP4 파일 생성 중...');
-
-    // 녹화된 데이터를 MP4로 저장
-    // chunks는 항상 mp4 type으로 강제 저장
-    mp4Blob = new Blob(chunks, { type: 'video/mp4' });
-    setMp4Progress(100, `완성! (${Math.round(mp4Blob.size/1024/1024).toFixed(1)}MB) — 다운로드 버튼을 눌러 저장하세요`);
+    setMp4Progress(97, '파일 생성 중...');
+    mp4Blob = new Blob(chunks, { type: mimeType });
+    const sizeMB = (mp4Blob.size/1024/1024).toFixed(1);
+    const ext = mimeType.includes('mp4') ? 'mp4' : 'webm';
+    setMp4Progress(100, `완성! ${sizeMB}MB (.${ext}) — 다운로드 버튼으로 저장`);
 
     const url = URL.createObjectURL(mp4Blob);
     document.getElementById('mp4Preview').src = url;
     result.style.display = 'block';
-    showToast('✅ 완성! 아래 다운로드 버튼으로 저장하세요');
+    showToast(`✅ ${ext.toUpperCase()} 완성! 다운로드 버튼을 눌러 저장하세요`);
 
   } catch(e){
     console.error('MP4 오류:', e);
@@ -2164,14 +2163,12 @@ async function makeMp4(){
 }
 
 function getSupportedMime(){
-  // MP4 우선 시도, 없으면 WebM (opus 포함으로 오디오 보장)
+  // WebM 우선 — 모든 환경에서 안정적으로 동작
   const types = [
-    'video/mp4;codecs=avc1.42E01E,mp4a.40.2',
-    'video/mp4;codecs=avc1',
-    'video/mp4',
     'video/webm;codecs=vp9,opus',
     'video/webm;codecs=vp8,opus',
     'video/webm;codecs=vp9',
+    'video/webm;codecs=vp8',
     'video/webm',
   ];
   for(const t of types){
@@ -2256,31 +2253,17 @@ function setMp4Progress(pct, label){
 }
 
 function downloadMp4(){
-  if(!mp4Blob){ showToast('⚠️ 먼저 MP4를 생성하세요'); return; }
-
-  const dlBtn = document.getElementById('mp4DlBtn');
-  if(dlBtn) dlBtn.textContent = '⏳ 저장 중...';
-
-  try {
-    // 항상 .mp4 확장자로 저장 (갤러리·Vrew·유튜브 호환)
-    const saveBlob = new Blob([mp4Blob], { type: 'video/mp4' });
-    const url  = URL.createObjectURL(saveBlob);
-    const a    = document.createElement('a');
-    a.href     = url;
-    a.download = `e-빠른뉴스-${Date.now()}.mp4`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    setTimeout(() => URL.revokeObjectURL(url), 3000);
-    showToast('✅ MP4 저장 시작! 갤러리에서 확인하세요', 3000);
-  } catch(e){
-    showToast('⚠️ 저장 실패: ' + e.message, 4000);
-  }
-
-  if(dlBtn) dlBtn.textContent = '⬇️ MP4 다운로드 (갤러리 저장)';
+  if(!mp4Blob){ showToast('⚠️ 먼저 영상을 생성하세요'); return; }
+  const ext = mp4Blob.type.includes('mp4') ? 'mp4' : 'webm';
+  const a   = document.createElement('a');
+  a.href    = URL.createObjectURL(mp4Blob);
+  a.download = `e-빠른뉴스-${Date.now()}.${ext}`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  showToast(`⬇️ ${ext.toUpperCase()} 다운로드 시작!`);
 }
 
-// (구) ffmpeg 변환 함수 — 더 이상 사용 안 함
 async function convertToMp4AndDownload(blob){ downloadMp4(); }
 
 // ── 가로형 (16:9) 뉴스카드 렌더링 ──
