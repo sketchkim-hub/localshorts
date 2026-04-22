@@ -2144,15 +2144,16 @@ async function makeMp4(){
     });
 
     setMp4Progress(97, 'MP4 파일 생성 중...');
-    const ext  = mimeType.includes('mp4') ? 'mp4' : 'webm';
-    const mime = mimeType.includes('mp4') ? 'video/mp4' : 'video/webm';
-    mp4Blob = new Blob(chunks, { type: mime });
-    setMp4Progress(100, `완성! (${Math.round(mp4Blob.size/1024)}KB)`);
+
+    // 녹화된 데이터를 MP4로 저장
+    // chunks는 항상 mp4 type으로 강제 저장
+    mp4Blob = new Blob(chunks, { type: 'video/mp4' });
+    setMp4Progress(100, `완성! (${Math.round(mp4Blob.size/1024/1024).toFixed(1)}MB) — 다운로드 버튼을 눌러 저장하세요`);
 
     const url = URL.createObjectURL(mp4Blob);
     document.getElementById('mp4Preview').src = url;
     result.style.display = 'block';
-    showToast(`✅ ${ext.toUpperCase()} 완성! (${Math.round(mp4Blob.size/1024)}KB)`);
+    showToast('✅ 완성! 아래 다운로드 버튼으로 저장하세요');
 
   } catch(e){
     console.error('MP4 오류:', e);
@@ -2163,18 +2164,19 @@ async function makeMp4(){
 }
 
 function getSupportedMime(){
-  // 오디오 코덱 명시 — 음성 포함 보장
-  const types=[
-    'video/webm;codecs=vp9,opus',
-    'video/webm;codecs=vp8,opus',
-    'video/webm;codecs=opus',
-    'video/webm;codecs=vp9',
-    'video/webm;codecs=vp8',
+  // MP4 우선 시도, 없으면 WebM (opus 포함으로 오디오 보장)
+  const types = [
+    'video/mp4;codecs=avc1.42E01E,mp4a.40.2',
     'video/mp4;codecs=avc1',
     'video/mp4',
+    'video/webm;codecs=vp9,opus',
+    'video/webm;codecs=vp8,opus',
+    'video/webm;codecs=vp9',
     'video/webm',
   ];
-  for(const t of types){ if(MediaRecorder.isTypeSupported(t)) return t; }
+  for(const t of types){
+    if(MediaRecorder.isTypeSupported(t)) return t;
+  }
   return 'video/webm';
 }
 
@@ -2255,94 +2257,31 @@ function setMp4Progress(pct, label){
 
 function downloadMp4(){
   if(!mp4Blob){ showToast('⚠️ 먼저 MP4를 생성하세요'); return; }
-  convertToMp4AndDownload(mp4Blob);
-}
 
-// ── ffmpeg.wasm 0.11.x (GitHub Pages 호환, SharedArrayBuffer 불필요) ──
-let ffmpegReady = false;
-let ffmpegObj   = null;
-
-async function ensureFfmpeg(){
-  if(ffmpegReady && ffmpegObj) return ffmpegObj;
-
-  // 스크립트 동적 로드
-  await new Promise((res, rej) => {
-    if(window.FFmpeg){ res(); return; }
-    const s = document.createElement('script');
-    s.src = 'https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js';
-    s.onload = res;
-    s.onerror = () => rej(new Error('ffmpeg 로드 실패'));
-    document.head.appendChild(s);
-  });
-
-  const { createFFmpeg } = window.FFmpeg;
-  ffmpegObj = createFFmpeg({
-    log: false,
-    corePath: 'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.11.0/dist/ffmpeg-core.js',
-  });
-  await ffmpegObj.load();
-  ffmpegReady = true;
-  return ffmpegObj;
-}
-
-async function convertToMp4AndDownload(blob){
   const dlBtn = document.getElementById('mp4DlBtn');
-  if(dlBtn){ dlBtn.disabled = true; dlBtn.textContent = '🔄 MP4 변환 중...'; }
-  document.getElementById('mp4Progress').style.display = 'block';
-  setMp4Progress(95, '🔄 ffmpeg 로딩 중... (최초 1회 30초 소요)');
+  if(dlBtn) dlBtn.textContent = '⏳ 저장 중...';
 
   try {
-    const ffmpeg = await ensureFfmpeg();
-
-    setMp4Progress(97, '🔄 MP4 인코딩 중...');
-
-    const { fetchFile } = window.FFmpeg;
-    const inputName = 'input.webm';
-    ffmpeg.FS('writeFile', inputName, await fetchFile(blob));
-
-    await ffmpeg.run(
-      '-i', inputName,
-      '-c:v', 'libx264',
-      '-preset', 'ultrafast',
-      '-crf', '23',
-      '-c:a', 'aac',
-      '-b:a', '128k',
-      '-movflags', '+faststart',
-      '-y',
-      'output.mp4'
-    );
-
-    const data = ffmpeg.FS('readFile', 'output.mp4');
-    const mp4  = new Blob([data.buffer], { type: 'video/mp4' });
-
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(mp4);
+    // 항상 .mp4 확장자로 저장 (갤러리·Vrew·유튜브 호환)
+    const saveBlob = new Blob([mp4Blob], { type: 'video/mp4' });
+    const url  = URL.createObjectURL(saveBlob);
+    const a    = document.createElement('a');
+    a.href     = url;
     a.download = `e-빠른뉴스-${Date.now()}.mp4`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
-
-    // 임시 파일 정리
-    try { ffmpeg.FS('unlink', inputName); ffmpeg.FS('unlink', 'output.mp4'); } catch(e){}
-
-    setMp4Progress(100, '✅ MP4 저장 완료! (갤러리·Vrew 모두 열림)');
-    showToast('✅ MP4 저장 완료!', 3000);
-
+    setTimeout(() => URL.revokeObjectURL(url), 3000);
+    showToast('✅ MP4 저장 시작! 갤러리에서 확인하세요', 3000);
   } catch(e){
-    console.warn('MP4 변환 실패:', e.message);
-    // Fallback: WebM 그대로 저장
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `e-빠른뉴스-${Date.now()}.webm`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    setMp4Progress(100, '⚠️ WebM으로 저장됨 (변환 실패)');
-    showToast('⚠️ MP4 변환 실패, WebM으로 저장', 4000);
+    showToast('⚠️ 저장 실패: ' + e.message, 4000);
   }
 
-  if(dlBtn){ dlBtn.disabled = false; dlBtn.textContent = '⬇️ MP4 다운로드 (갤러리 저장)'; }
+  if(dlBtn) dlBtn.textContent = '⬇️ MP4 다운로드 (갤러리 저장)';
 }
+
+// (구) ffmpeg 변환 함수 — 더 이상 사용 안 함
+async function convertToMp4AndDownload(blob){ downloadMp4(); }
 
 // ── 가로형 (16:9) 뉴스카드 렌더링 ──
 async function drawNewsCardHorizontal(ctx, W, H, img){
