@@ -7,8 +7,6 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <title>e-빠른뉴스 쇼츠 메이커 v4</title>
-<script src="https://unpkg.com/@ffmpeg/ffmpeg@0.12.10/dist/umd/ffmpeg.js"></script>
-<script src="https://unpkg.com/@ffmpeg/util@0.12.1/dist/umd/index.js"></script>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=Noto+Sans+KR:wght@300;400;500;700&display=swap');
 :root {
@@ -229,7 +227,7 @@ input[type="range"]{flex:1;accent-color:var(--accent);}
 .preview-frame{width:var(--preview-w);height:var(--preview-h);border-radius:18px;overflow:hidden;position:relative;border:2px solid var(--border);box-shadow:0 20px 60px rgba(0,0,0,0.6);flex-shrink:0;}
 .pv-inner{width:100%;height:100%;padding:14px 16px 36px;display:flex;flex-direction:column;position:relative;box-sizing:border-box;}
 .pv-photo-zone{border-radius:10px;overflow:hidden;margin:4px 0 6px;background:rgba(255,255,255,0.05);display:flex;align-items:center;justify-content:center;font-size:28px;flex-shrink:0;height:40%;}
-.pv-photo-zone img{width:100%;height:100%;object-fit:cover;}
+.pv-photo-zone img{width:100%;height:100%;object-fit:contain;background:#000;}
 .pv-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;flex-shrink:0;}
 .pv-subtitle-zone{min-height:36px;display:flex;align-items:center;justify-content:center;padding:3px 8px;flex-shrink:0;margin:2px 0;}
 .pv-subtitle-text{font-size:12px;font-weight:700;text-align:center;line-height:1.4;color:#fff;text-shadow:1px 1px 3px rgba(0,0,0,0.9);word-break:keep-all;}
@@ -805,7 +803,7 @@ input[type="range"]{flex:1;accent-color:var(--accent);}
 
       <div id="mp4Result" style="display:none;margin-top:14px">
         <video id="mp4Preview" controls style="width:100%;border-radius:10px;max-height:300px;background:#000"></video>
-        <button class="dl-btn" style="margin-top:8px" onclick="downloadMp4()">⬇️ MP4 다운로드</button>
+        <button class="dl-btn" id="mp4DlBtn" style="margin-top:8px" onclick="downloadMp4()">⬇️ MP4 다운로드 (갤러리 저장)</button>
       </div>
     </div>
   </div>
@@ -2257,76 +2255,93 @@ function setMp4Progress(pct, label){
 
 function downloadMp4(){
   if(!mp4Blob){ showToast('⚠️ 먼저 MP4를 생성하세요'); return; }
-  const isMp4 = mp4Blob.type.includes('mp4');
-  if(isMp4){
-    // 이미 MP4 — 바로 다운로드
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(mp4Blob);
-    a.download = `e-빠른뉴스-${Date.now()}.mp4`;
-    a.click();
-    showToast('⬇️ MP4 다운로드 시작!');
-  } else {
-    // WebM → ffmpeg.wasm으로 MP4 변환
-    convertWebmToMp4(mp4Blob);
-  }
+  convertToMp4AndDownload(mp4Blob);
 }
 
-async function convertWebmToMp4(webmBlob){
-  const btn = document.querySelector('.dl-btn');
-  const origText = btn ? btn.textContent : '';
-  if(btn) btn.textContent = '🔄 MP4 변환 중...';
-  showToast('🔄 WebM → MP4 변환 중... (30초~1분 소요)', 8000);
+// ── ffmpeg.wasm 0.11.x (GitHub Pages 호환, SharedArrayBuffer 불필요) ──
+let ffmpegReady = false;
+let ffmpegObj   = null;
+
+async function ensureFfmpeg(){
+  if(ffmpegReady && ffmpegObj) return ffmpegObj;
+
+  // 스크립트 동적 로드
+  await new Promise((res, rej) => {
+    if(window.FFmpeg){ res(); return; }
+    const s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js';
+    s.onload = res;
+    s.onerror = () => rej(new Error('ffmpeg 로드 실패'));
+    document.head.appendChild(s);
+  });
+
+  const { createFFmpeg } = window.FFmpeg;
+  ffmpegObj = createFFmpeg({
+    log: false,
+    corePath: 'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.11.0/dist/ffmpeg-core.js',
+  });
+  await ffmpegObj.load();
+  ffmpegReady = true;
+  return ffmpegObj;
+}
+
+async function convertToMp4AndDownload(blob){
+  const dlBtn = document.getElementById('mp4DlBtn');
+  if(dlBtn){ dlBtn.disabled = true; dlBtn.textContent = '🔄 MP4 변환 중...'; }
+  document.getElementById('mp4Progress').style.display = 'block';
+  setMp4Progress(95, '🔄 ffmpeg 로딩 중... (최초 1회 30초 소요)');
 
   try {
-    // ffmpeg.wasm 로드 확인
-    if(typeof FFmpeg === 'undefined'){
-      throw new Error('ffmpeg 로드 실패 — WebM으로 다운로드합니다');
-    }
+    const ffmpeg = await ensureFfmpeg();
 
-    const { FFmpeg: FF } = FFmpeg;
-    const { fetchFile } = FFmpegUtil;
-    const ffmpeg = new FF();
+    setMp4Progress(97, '🔄 MP4 인코딩 중...');
 
-    // SharedArrayBuffer 미지원 환경 체크
-    if(typeof SharedArrayBuffer === 'undefined'){
-      throw new Error('SharedArrayBuffer 미지원');
-    }
+    const { fetchFile } = window.FFmpeg;
+    const inputName = 'input.webm';
+    ffmpeg.FS('writeFile', inputName, await fetchFile(blob));
 
-    await ffmpeg.load({
-      coreURL: 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd/ffmpeg-core.js',
-    });
-
-    const inputData = await fetchFile(webmBlob);
-    await ffmpeg.writeFile('input.webm', inputData);
-
-    // WebM → MP4 변환 (H.264 + AAC)
-    await ffmpeg.exec([
-      '-i','input.webm',
-      '-c:v','libx264','-preset','fast','-crf','23',
-      '-c:a','aac','-b:a','128k',
-      '-movflags','+faststart',
+    await ffmpeg.run(
+      '-i', inputName,
+      '-c:v', 'libx264',
+      '-preset', 'ultrafast',
+      '-crf', '23',
+      '-c:a', 'aac',
+      '-b:a', '128k',
+      '-movflags', '+faststart',
+      '-y',
       'output.mp4'
-    ]);
+    );
 
-    const data = await ffmpeg.readFile('output.mp4');
-    const mp4 = new Blob([data.buffer], { type:'video/mp4' });
+    const data = ffmpeg.FS('readFile', 'output.mp4');
+    const mp4  = new Blob([data.buffer], { type: 'video/mp4' });
+
     const a = document.createElement('a');
     a.href = URL.createObjectURL(mp4);
     a.download = `e-빠른뉴스-${Date.now()}.mp4`;
+    document.body.appendChild(a);
     a.click();
-    showToast('✅ MP4 변환 완료! 다운로드 시작');
+    document.body.removeChild(a);
+
+    // 임시 파일 정리
+    try { ffmpeg.FS('unlink', inputName); ffmpeg.FS('unlink', 'output.mp4'); } catch(e){}
+
+    setMp4Progress(100, '✅ MP4 저장 완료! (갤러리·Vrew 모두 열림)');
+    showToast('✅ MP4 저장 완료!', 3000);
 
   } catch(e){
     console.warn('MP4 변환 실패:', e.message);
-    // 실패 시 WebM으로 그냥 다운로드
+    // Fallback: WebM 그대로 저장
     const a = document.createElement('a');
-    a.href = URL.createObjectURL(webmBlob);
+    a.href = URL.createObjectURL(blob);
     a.download = `e-빠른뉴스-${Date.now()}.webm`;
+    document.body.appendChild(a);
     a.click();
-    showToast('⚠️ MP4 변환 실패 → WebM으로 다운로드\n(유튜브는 WebM도 업로드 가능합니다)', 5000);
+    document.body.removeChild(a);
+    setMp4Progress(100, '⚠️ WebM으로 저장됨 (변환 실패)');
+    showToast('⚠️ MP4 변환 실패, WebM으로 저장', 4000);
   }
 
-  if(btn) btn.textContent = origText;
+  if(dlBtn){ dlBtn.disabled = false; dlBtn.textContent = '⬇️ MP4 다운로드 (갤러리 저장)'; }
 }
 
 // ── 가로형 (16:9) 뉴스카드 렌더링 ──
@@ -2359,18 +2374,26 @@ async function drawNewsCardHorizontal(ctx, W, H, img){
   const splitX = Math.round(W * 0.58);
   const margin = 48;
 
-  // 왼쪽 — 사진
+  // 왼쪽 — 사진 (contain: 전체 보기, 잘림 없음)
   if(img){
     try {
-      ctx.save();
-      roundRect(ctx, margin, margin, splitX - margin*2, H - margin*2, 32);
-      ctx.clip();
-      const ir=img.width/img.height, cr=(splitX-margin*2)/(H-margin*2);
-      let sw,sh,sx,sy;
-      if(ir>cr){sh=img.height;sw=sh*cr;sx=(img.width-sw)/2;sy=0;}
-      else{sw=img.width;sh=sw/cr;sx=0;sy=(img.height-sh)/2;}
-      ctx.drawImage(img,sx,sy,sw,sh, margin,margin, splitX-margin*2, H-margin*2);
-      ctx.restore();
+      const zoneW = splitX - margin*2;
+      const zoneH = H - margin*2;
+      const ir    = img.width / img.height;
+      const zr    = zoneW / zoneH;
+      let dw, dh, dx, dy;
+      if(ir > zr){
+        dw = zoneW; dh = Math.round(zoneW / ir);
+        dx = margin; dy = margin + Math.round((zoneH - dh) / 2);
+      } else {
+        dh = zoneH; dw = Math.round(zoneH * ir);
+        dx = margin + Math.round((zoneW - dw) / 2); dy = margin;
+      }
+      // 레터박스 배경
+      ctx.fillStyle = 'rgba(0,0,0,0.35)';
+      roundRect(ctx, margin, margin, zoneW, zoneH, 32);
+      ctx.fill();
+      ctx.drawImage(img, 0, 0, img.width, img.height, dx, dy, dw, dh);
     } catch(e){}
   } else {
     ctx.fillStyle='rgba(255,255,255,0.06)';
@@ -2477,24 +2500,43 @@ async function drawNewsCardWithPhoto(ctx, W, H, img){
   ctx.fillStyle = grd;
   ctx.fillRect(0, 0, W, H);
 
-  // 사진 그리기 — img 파라미터 사용
+  // 사진 그리기 — contain 방식 (전체 보기, 잘림 없음)
   if(img && S.layout !== 'none'){
     try {
       const ph = Math.round(H * 0.45);
       const py = S.layout === 'top' ? 160 : Math.round(H * 0.28);
       const margin = 60;
+      const zoneW = W - margin*2;
+
+      // contain: 사진 전체가 보이도록 비율 유지
+      const ir = img.width / img.height;
+      const zr = zoneW / ph;
+      let dw, dh, dx, dy;
+      if(ir > zr){
+        // 사진이 더 가로 → 너비 기준 맞춤
+        dw = zoneW;
+        dh = Math.round(zoneW / ir);
+        dx = margin;
+        dy = py + Math.round((ph - dh) / 2);
+      } else {
+        // 사진이 더 세로 → 높이 기준 맞춤
+        dh = ph;
+        dw = Math.round(ph * ir);
+        dx = margin + Math.round((zoneW - dw) / 2);
+        dy = py;
+      }
+
+      // 사진 영역 배경 (레터박스)
       ctx.save();
-      roundRect(ctx, margin, py, W-margin*2, ph, 40);
-      ctx.clip();
-      const ir = img.width/img.height, cr = (W-margin*2)/ph;
-      let sw,sh,sx,sy;
-      if(ir>cr){ sh=img.height; sw=sh*cr; sx=(img.width-sw)/2; sy=0; }
-      else { sw=img.width; sh=sw/cr; sx=0; sy=(img.height-sh)/2; }
-      ctx.drawImage(img, sx,sy,sw,sh, margin,py, W-margin*2, ph);
+      ctx.fillStyle = 'rgba(0,0,0,0.4)';
+      roundRect(ctx, margin, py, zoneW, ph, 40);
+      ctx.fill();
+
+      // 사진 그리기 (클리핑 없이 전체 표시)
+      ctx.drawImage(img, 0, 0, img.width, img.height, dx, dy, dw, dh);
       ctx.restore();
     } catch(e){ console.warn('이미지 그리기 실패', e); }
   } else if(S.layout !== 'none'){
-    // 사진 없을 때 빈 영역 표시
     const ph = Math.round(H * 0.45);
     const py = S.layout === 'top' ? 160 : Math.round(H * 0.28);
     const margin = 60;
